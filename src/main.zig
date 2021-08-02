@@ -19,7 +19,9 @@ pub fn print(comptime fmt: []const u8, args: anytype) void {
         std.debug.print(fmt, args);
     // std.log.debug(fmt, args);
 }
-
+inline fn SIMDJSON_ROUNDUP_N(a: usize, n: usize) usize {
+    return (a + (n - 1)) & ~(n - 1);
+}
 const Document = struct {
     tape: std.ArrayListUnmanaged(u64),
     string_buf: std.ArrayListUnmanaged(u8),
@@ -29,6 +31,29 @@ const Document = struct {
             .string_buf = std.ArrayListUnmanaged(u8){},
         };
     }
+
+    pub fn allocate(document: *Document, allocator: *mem.Allocator, capacity: usize) !void {
+        if (capacity == 0) return;
+
+        // a pathological input like "[[[[..." would generate capacity tape elements, so
+        // need a capacity of at least capacity + 1, but it is also possible to do
+        // worse with "[7,7,7,7,6,7,7,7,6,7,7,6,[7,7,7,7,6,7,7,7,6,7,7,6,7,7,7,7,7,7,6"
+        //where capacity + 1 tape elements are
+        // generated, see issue https://github.com/simdjson/simdjson/issues/345
+        const tape_capacity = SIMDJSON_ROUNDUP_N(capacity + 3, 64);
+        // a document with only zero-length strings... could have capacity/3 string
+        // and we would need capacity/3 * 5 bytes on the string buffer
+        const string_capacity = SIMDJSON_ROUNDUP_N(5 * capacity / 3 + SIMDJSON_PADDING, 64);
+        //   string_buf.reset( new (std::nothrow) uint8_t[string_capacity]);
+        //   tape.reset(new (std::nothrow) uint64_t[tape_capacity]);
+        errdefer {
+            document.string_buf.deinit(allocator);
+            document.tape.deinit(allocator);
+        }
+        try document.tape.ensureTotalCapacity(allocator, tape_capacity);
+        try document.string_buf.ensureTotalCapacity(allocator, string_capacity);
+    }
+
     pub fn deinit(doc: *Document, allocator: *mem.Allocator) void {
         doc.tape.deinit(allocator);
         doc.string_buf.deinit(allocator);
@@ -119,7 +144,7 @@ const BitIndexer = struct {
 };
 
 pub const FileError = std.fs.File.OpenError || std.fs.File.ReadError || std.fs.File.SeekError;
-pub const Error = std.mem.Allocator.Error || std.os.WriteError || FileError || error{EndOfStream} || JsonError;
+pub const Error = std.mem.Allocator.Error || std.os.WriteError || FileError || error{ EndOfStream, Overflow } || JsonError;
 const JsonError = error{
     ///< This parser can't support a document that big
     CAPACITY,
@@ -456,11 +481,9 @@ const StructuralIndexer = struct {
     fn step(si: *StructuralIndexer, read_buf: [64]u8, parser: *Parser, reader_pos: u64) !void {
         if (STEP_SIZE == 64) {
             const block_1 = nextBlock(parser, read_buf);
-            // const input: [64]u8 = input_vec;
             // std.log.debug("{s}", .{input});
             try si.next(read_buf, block_1, reader_pos, parser.allocator);
             // TODO: better allocation strategy
-            // try parser.buf.appendSlice(parser.allocator, &input);
             // std.log.debug("stream pos {}", .{try stream.getPos()});
         } else {
             return error.NotImplemented;
@@ -512,9 +535,6 @@ const StructuralIndexer = struct {
         new_inds[0] = @intCast(u32, len);
         new_inds[1] = @intCast(u32, len);
         new_inds[2] = 0;
-        //   parser.structural_indexes[parser.n_structural_indexes] = uint32_t(len);
-        //   parser.structural_indexes[parser.n_structural_indexes + 1] = uint32_t(len);
-        //   parser.structural_indexes[parser.n_structural_indexes + 2] = 0;
         parser.next_structural_index = 0;
         // a valid JSON file cannot have zero structural indexes - we should have found something
         if (parser.indexer.bit_indexer.tail.items.len == 0) {
@@ -568,16 +588,12 @@ const StructuralIndexer = struct {
         comptime var n: u8 = 0;
         var result: [STEP_SIZE / 64]Block = undefined;
         inline while (n < (STEP_SIZE / 64)) : (n += 1) {
-            // var read_buf = @intToPtr([*]u8, mem.alignForward(@ptrToInt(&read_buf0), @alignOf(u8x64)))[0..64];
             const bytes_read = try reader.read(&read_buf);
             if (bytes_read == 0)
                 break
             else if (bytes_read != 64) std.debug.panic("TODO: bytes_read ({}) != 64 ({})", .{ bytes_read, STEP_SIZE });
-            // const input_vec_ptr = @ptrCast(*const u8x64, @alignCast(@alignOf(u8x64), read_buf));
             const input_vec: u8x64 = read_buf[0..64].*;
-            // const chunks = @ptrCast([2]u8x32, @alignCast(@alignOf([2]u8x32), input_vec_ptr));
             const chunks = @bitCast([2]u8x32, input_vec);
-            // try parser.feed(buf[0..input_read_len], &result);
             println("{s} | input data : len {}", .{ read_buf, bytes_read });
 
             // TODO: if STEP_SIZE == 128, repeat
@@ -639,17 +655,14 @@ pub const Iterator = struct {
         };
     }
 
-    inline fn advance(iter: *Iterator) !u8 {
+    inline fn advance(iter: *Iterator) [*]const u8 {
         defer iter.next_structural += 1;
         // std.log.debug("advance() next_structural idx {} peek() '{c}'", .{ (@ptrToInt(iter.next_structural) - @ptrToInt(iter.parser.indexer.bit_indexer.tail.items.ptr)) / 4, iter.peek() });
         return iter.peek();
     }
 
-    inline fn peek(iter: *Iterator) !u8 {
-        try iter.parser.stream_source.seekTo(iter.next_structural[0]);
-        var buf: [1]u8 = undefined;
-        const bytes_read = try iter.parser.stream_source.read(&buf);
-        return if (bytes_read == 0) error.EndOfStream else buf[0];
+    inline fn peek(iter: *Iterator) [*]const u8 {
+        return iter.parser.bytes.ptr + iter.next_structural[0];
     }
 
     inline fn at_beginning(iter: *Iterator) bool {
@@ -691,10 +704,6 @@ pub const Iterator = struct {
         }
     }
 
-    // fn log_line(iter: *Iterator, title_prefix: []const u8, title: []const u8, detail: []const u8) void {
-    //     _ = iter;
-    //     if (debug) println("{s} {s} {s}", .{ title_prefix, title, detail });
-    // }
     fn printable_char(c: u8) u8 {
         return if (c >= 0x20) c else ' ';
     }
@@ -718,29 +727,22 @@ pub const Iterator = struct {
         var buf2: [LOG_BUFFER_LEN]u8 = undefined;
         const content = blk: {
             if (current_index) |ci| {
-                const pos = iter.parser.stream_source.getPos() catch unreachable;
-                defer iter.parser.stream_source.seekTo(pos) catch unreachable;
-                iter.parser.stream_source.seekTo(ci[0]) catch unreachable;
-                const nbytes = iter.parser.stream_source.read(&buf2) catch unreachable;
-                for (buf2[0..nbytes]) |*c| {
-                    c.* = printable_char(c.*);
+                for (buf2) |*c, i| {
+                    c.* = printable_char(iter.parser.bytes[ci[0] + i]);
                 }
-                break :blk pad_with_alloc(buf2[0..nbytes], ' ', LOG_BUFFER_LEN, &fba.allocator);
+                break :blk pad_with_alloc(&buf2, ' ', LOG_BUFFER_LEN, &fba.allocator);
             } else {
                 break :blk &pad_with("", ' ', LOG_BUFFER_LEN);
             }
         };
         print("| {s} ", .{content});
-
         const next_content = blk: {
-            const pos = iter.parser.stream_source.getPos() catch unreachable;
-            defer iter.parser.stream_source.seekTo(pos) catch unreachable;
-            iter.parser.stream_source.seekTo(next_index[0]) catch unreachable;
-            const nbytes = iter.parser.stream_source.read(buf2[0..LOG_SMALL_BUFFER_LEN]) catch unreachable;
-            for (buf2[0..nbytes]) |*c| {
-                c.* = printable_char(c.*);
+            for (buf2) |*c, i| {
+                if (next_index[0] + i >= iter.parser.bytes.len) break;
+                // std.log.debug("bytes.len {} next_index[0] {} i {}", .{ iter.parser.bytes.len, next_index[0], i });
+                c.* = printable_char(iter.parser.bytes[next_index[0] + i]);
             }
-            break :blk pad_with_alloc(buf2[0..nbytes], ' ', LOG_SMALL_BUFFER_LEN, &fba.allocator);
+            break :blk pad_with_alloc(&buf2, ' ', LOG_SMALL_BUFFER_LEN, &fba.allocator);
         };
         print("| {s} ", .{next_content});
 
@@ -788,31 +790,31 @@ pub const Iterator = struct {
         }
         try visitor.visit_object_start(iter);
 
-        const key = try iter.advance();
-        if (key != '"') {
+        const key = iter.advance();
+        if (key[0] != '"') {
             iter.log_error("Object does not start with a key");
             return error.TAPE_ERROR;
         }
         iter.increment_count();
-        try visitor.visit_key(iter);
+        try visitor.visit_key(iter, key);
         return iter.object_field(visitor);
     }
 
     inline fn object_field(iter: *Iterator, visitor: *TapeBuilder) Error!void {
-        if ((try iter.advance()) != ':') {
+        if (iter.advance()[0] != ':') {
             iter.log_error("Missing colon after key in object");
             return error.TAPE_ERROR;
         }
 
-        const value = try iter.advance();
-        switch (value) {
-            '{' => if ((try iter.peek()) == '}') {
-                _ = iter.advance() catch unreachable;
+        const value = iter.advance();
+        switch (value[0]) {
+            '{' => if (iter.peek()[0] == '}') {
+                _ = iter.advance();
                 iter.log_value("empty object");
                 try visitor.visit_empty_object(iter);
             } else return iter.object_begin(visitor),
-            '[' => if ((try iter.peek()) == ']') {
-                _ = iter.advance() catch unreachable;
+            '[' => if (iter.peek()[0] == ']') {
+                _ = iter.advance();
                 iter.log_value("empty array");
                 try visitor.visit_empty_array(iter);
             } else return iter.array_begin(visitor),
@@ -822,18 +824,18 @@ pub const Iterator = struct {
     }
 
     inline fn object_continue(iter: *Iterator, visitor: *TapeBuilder) Error!void {
-        const value = try iter.advance();
+        const value = iter.advance();
         // std.log.debug("object_continue() value '{c}'", .{value});
-        switch (value) {
+        switch (value[0]) {
             ',' => {
                 iter.increment_count();
-                const key = try iter.advance();
+                const key = iter.advance();
                 // println("key '{c}'", .{key});
-                if (key != '"') {
+                if (key[0] != '"') {
                     iter.log_error("Key string missing at beginning of field in object");
                     return error.TAPE_ERROR;
                 }
-                try visitor.visit_key(iter);
+                try visitor.visit_key(iter, key);
                 return iter.object_field(visitor);
             },
             '}' => {
@@ -873,19 +875,19 @@ pub const Iterator = struct {
     }
 
     inline fn array_value(iter: *Iterator, visitor: *TapeBuilder) Error!void {
-        const value = try iter.advance();
-        switch (value) {
+        const value = iter.advance();
+        switch (value[0]) {
             '{' => {
-                if ((try iter.peek()) == '}') {
-                    _ = iter.advance() catch unreachable;
+                if (iter.peek()[0] == '}') {
+                    _ = iter.advance();
                     iter.log_value("empty object");
                     try visitor.visit_empty_object(iter);
                 }
                 return iter.object_begin(visitor);
             },
             '[' => {
-                if ((try iter.peek()) == ']') {
-                    _ = iter.advance() catch unreachable;
+                if (iter.peek()[0] == ']') {
+                    _ = iter.advance();
                     iter.log_value("empty array");
                     try visitor.visit_empty_array(iter);
                 }
@@ -897,7 +899,7 @@ pub const Iterator = struct {
     }
 
     inline fn array_continue(iter: *Iterator, visitor: *TapeBuilder) Error!void {
-        switch (try iter.advance()) {
+        switch (iter.advance()[0]) {
             ',' => {
                 iter.increment_count();
                 return iter.array_value(visitor);
@@ -923,11 +925,10 @@ pub const Iterator = struct {
 
         // TODO
         // If we didn't make it to the end, it's an error
-        //   if ( !STREAMING and iter.parser.next_structural_index != dom_parser.n_structural_indexes ) {
-        //     log_error("More than one JSON value at the root of the document, or extra characters at the end of the JSON!");
-        //     return TAPE_ERROR;
-        //   }
-
+        if (!STREAMING and iter.parser.next_structural_index != iter.parser.indexer.bit_indexer.tail.items.len) {
+            iter.log_error("More than one JSON value at the root of the document, or extra characters at the end of the JSON!");
+            return error.TAPE_ERROR;
+        }
     }
 
     inline fn current_container(iter: *Iterator) *OpenContainerInfo {
@@ -949,19 +950,20 @@ pub const Iterator = struct {
         iter.log_start();
         iter.log_start_value("document");
         try visitor.visit_document_start(iter);
+        if (iter.parser.bytes.len == 0) return iter.document_end(visitor);
 
-        const value = try iter.advance();
-        switch (value) {
+        const value = iter.advance();
+        switch (value[0]) {
             '{' => {
-                if ((try iter.peek()) == '}') {
-                    _ = iter.advance() catch unreachable;
+                if (iter.peek()[0] == '}') {
+                    _ = iter.advance();
                     iter.log_value("empty object");
                     try visitor.visit_empty_object(iter);
                 } else return try iter.object_begin(visitor);
             },
             '[' => {
-                if ((try iter.peek()) == ']') {
-                    _ = iter.advance() catch unreachable;
+                if (iter.peek()[0] == ']') {
+                    _ = iter.advance();
                     iter.log_value("empty array");
                     try visitor.visit_empty_array(iter);
                 } else return try iter.array_begin(visitor);
@@ -991,21 +993,6 @@ pub const TapeType = enum(u8) {
     }
     pub fn from_u64(x: u64) TapeType {
         return std.meta.intToEnum(TapeType, (x & 0xff00000000000000) >> 56) catch .INVALID;
-        // return switch (x >> 56) {
-        //     @enumToInt(TapeType.ROOT) => .ROOT,
-        //     @enumToInt(TapeType.START_ARRAY) => .START_ARRAY,
-        //     @enumToInt(TapeType.START_OBJECT) => .START_OBJECT,
-        //     @enumToInt(TapeType.END_ARRAY) => .END_ARRAY,
-        //     @enumToInt(TapeType.END_OBJECT) => .END_OBJECT,
-        //     @enumToInt(TapeType.STRING) => .STRING,
-        //     @enumToInt(TapeType.INT64) => .INT64,
-        //     @enumToInt(TapeType.UINT64) => .UINT64,
-        //     @enumToInt(TapeType.DOUBLE) => .DOUBLE,
-        //     @enumToInt(TapeType.TRUE_VALUE) => .TRUE_VALUE,
-        //     @enumToInt(TapeType.FALSE_VALUE) => .FALSE_VALUE,
-        //     @enumToInt(TapeType.NULL_VALUE) => .NULL_VALUE,
-        //     else => error.InvalidTypeType,
-        // };
     }
     pub fn as_u64_value(tt: TapeType, value: u64) u64 {
         assert(value <= std.math.maxInt(u56));
@@ -1015,10 +1002,12 @@ pub const TapeType = enum(u8) {
 
 pub const TapeBuilder = struct {
     tape: *std.ArrayListUnmanaged(u64),
+    current_string_buf_loc: [*]u8,
 
     pub fn init(doc: *Document) TapeBuilder {
         return .{
             .tape = &doc.tape,
+            .current_string_buf_loc = doc.string_buf.items.ptr,
         };
     }
 
@@ -1030,7 +1019,7 @@ pub const TapeBuilder = struct {
 
     pub inline fn write(tb: *TapeBuilder, iter: *Iterator, idx: usize, val: u64, tt: TapeType) void {
         _ = iter;
-        iter.log_line_fmt("", "write", "val {} tt {} idx {}", .{ val, tt, idx });
+        // iter.log_line_fmt("", "write", "val {} tt {} idx {}", .{ val, tt, idx });
         assert(idx < tb.tape.items.len);
         tb.tape.items[idx] = val | tt.as_u64();
     }
@@ -1059,15 +1048,6 @@ pub const TapeBuilder = struct {
         // try open_containers.ensureUnusedCapacity(allocator, 1);
         // const cidx = open_containers.addOneAssumeCapacity();
         const tape_idx = tb.next_tape_index();
-        // open_containers.set(cidx, .{
-        //     .is_array = is_array,
-        //     .open_container = .{
-        //         .tape_index = @intCast(u32, tape_idx),
-        //         .count = count,
-        //     },
-        // });
-        // return cidx;
-        // std.log.debug("start_container() {} is_array {}", .{ tape_idx, is_array });
         try open_containers.append(allocator, .{
             .is_array = is_array,
             .open_container = .{
@@ -1096,13 +1076,27 @@ pub const TapeBuilder = struct {
         // tb.write(iter, start_tape_index, tb.next_tape_index() | cntsat, start);
     }
 
-    inline fn on_start_string(tb: *TapeBuilder, iter: *Iterator) !void {
+    inline fn on_start_string(tb: *TapeBuilder, iter: *Iterator) ![*]u8 {
         // iter.log_line_fmt("", "start_string", "iter.parser.doc.string_buf.items.len {}", .{iter.parser.doc.string_buf.items.len});
-        try tb.append(iter, iter.parser.doc.string_buf.items.len, .STRING);
+        try tb.append(iter, @ptrToInt(tb.current_string_buf_loc) - @ptrToInt(iter.parser.doc.string_buf.items.ptr), .STRING);
+        return tb.current_string_buf_loc + @sizeOf(u32);
     }
-    inline fn on_end_string(_: *TapeBuilder, iter: *Iterator, str: []const u8) !void {
+    inline fn on_end_string(tb: *TapeBuilder, iter: *Iterator, dst: [*]const u8) !void {
+        const str_length = try std.math.cast(
+            u32,
+            @ptrToInt(dst - @ptrToInt(tb.current_string_buf_loc + @sizeOf(u32))) / 8,
+        );
+        // TODO check for overflow in case someone has a crazy string (>=4GB?)
+        // But only add the overflow check when the document itself exceeds 4GB
+        // Currently unneeded because we refuse to parse docs larger or equal to 4GB.
+
+        // @memcpy(current_string_buf_loc, &str_length, @sizeOf(u32));
+        // // NULL termination is still handy if you expect all your strings to
+        // // be NULL terminated? It comes at a small cost
+        // dst.* = 0;
+        // tb.current_string_buf_loc = dst + 1;
         // iter.log_line_fmt("", "end_string", "str {s}", .{str});
-        try iter.parser.doc.string_buf.appendSlice(iter.parser.allocator, str);
+        try iter.parser.doc.string_buf.appendSlice(iter.parser.allocator, dst[0..str_length]);
     }
 
     pub inline fn append2(tb: *TapeBuilder, iter: *Iterator, val: u64, val2: anytype, tt: TapeType) !void {
@@ -1115,9 +1109,9 @@ pub const TapeBuilder = struct {
         try tb.tape.append(iter.parser.allocator, val2);
     }
 
-    inline fn visit_root_primitive(visitor: *TapeBuilder, iter: *Iterator, value: u8) !void {
-        return switch (value) {
-            '"' => visitor.visit_string(iter, false),
+    inline fn visit_root_primitive(visitor: *TapeBuilder, iter: *Iterator, value: [*]const u8) !void {
+        return switch (value[0]) {
+            '"' => visitor.visit_string(iter, value, false),
             't' => visitor.visit_true_atom(iter, value),
             'f' => visitor.visit_false_atom(iter, value),
             'n' => visitor.visit_null_atom(iter, value),
@@ -1129,34 +1123,34 @@ pub const TapeBuilder = struct {
         };
     }
 
-    inline fn visit_number(tb: *TapeBuilder, iter: *Iterator, value: u8) Error!void {
+    inline fn visit_number(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log_value("number");
         try NumberParsing.parse_number(value, iter, tb);
         // TODO: support more number types
 
     }
-    inline fn visit_true_atom(tb: *TapeBuilder, iter: *Iterator, value: u8) Error!void {
+    inline fn visit_true_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log_value("true");
-        assert(value == 't');
-        if (!try AtomParsing.is_valid_true_atom(&iter.parser.stream_source)) return error.T_ATOM_ERROR;
+        assert(value[0] == 't');
+        if (!try AtomParsing.is_valid_true_atom(value)) return error.T_ATOM_ERROR;
         try tb.append(iter, 0, TapeType.TRUE_VALUE);
     }
-    inline fn visit_false_atom(tb: *TapeBuilder, iter: *Iterator, value: u8) Error!void {
+    inline fn visit_false_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log_value("false");
-        assert(value == 'f');
-        if (!try AtomParsing.is_valid_false_atom(&iter.parser.stream_source)) return error.T_ATOM_ERROR;
+        assert(value[0] == 'f');
+        if (!try AtomParsing.is_valid_false_atom(value)) return error.T_ATOM_ERROR;
         try tb.append(iter, 0, TapeType.FALSE_VALUE);
     }
-    inline fn visit_null_atom(tb: *TapeBuilder, iter: *Iterator, value: u8) Error!void {
+    inline fn visit_null_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log_value("null");
-        assert(value == 'n');
-        if (!try AtomParsing.is_valid_null_atom(&iter.parser.stream_source)) return error.T_ATOM_ERROR;
+        assert(value[0] == 'n');
+        if (!try AtomParsing.is_valid_null_atom(value)) return error.T_ATOM_ERROR;
         try tb.append(iter, 0, TapeType.NULL_VALUE);
     }
 
-    inline fn visit_primitive(tb: *TapeBuilder, iter: *Iterator, value: u8) !void {
-        return switch (value) {
-            '"' => tb.visit_string(iter, false),
+    inline fn visit_primitive(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) !void {
+        return switch (value[0]) {
+            '"' => tb.visit_string(iter, value, false),
             't' => tb.visit_true_atom(iter, value),
             'f' => tb.visit_false_atom(iter, value),
             'n' => tb.visit_null_atom(iter, value),
@@ -1168,27 +1162,19 @@ pub const TapeBuilder = struct {
         };
     }
 
-    inline fn visit_string(tb: *TapeBuilder, iter: *Iterator, key: bool) Error!void {
+    inline fn visit_string(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8, key: bool) Error!void {
         iter.log_value(if (key) "key" else "string");
-        try tb.on_start_string(iter);
-        var buf: [StringParsing.BackslashAndQuote.BYTES_PROCESSED]u8 = undefined;
-        const str = try StringParsing.parse_string(
-            &iter.parser.stream_source,
-            // &iter.parser.doc.string_buf,
-            // iter.parser.allocator,
-            &buf,
-        );
-        // if (debug) println("str.len {}", .{if (str != null) str.?.len else 0});
-
-        if (str == null) {
+        var dst = try tb.on_start_string(iter);
+        dst = StringParsing.parse_string(value + 1, dst) orelse {
             iter.log_error("Invalid escape in string");
             return error.STRING_ERROR;
-        }
-        try tb.on_end_string(iter, str.?);
+        };
+
+        try tb.on_end_string(iter, dst);
     }
 
-    pub inline fn visit_key(tb: *TapeBuilder, iter: *Iterator) !void {
-        return tb.visit_string(iter, true);
+    pub inline fn visit_key(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) !void {
+        return tb.visit_string(iter, value, true);
     }
 
     pub inline fn visit_empty_object(tb: *TapeBuilder, iter: *Iterator) Error!void {
@@ -1219,7 +1205,6 @@ pub const TapeBuilder = struct {
     pub inline fn visit_document_end(tb: *TapeBuilder, iter: *Iterator) !void {
         // try tb.tape.append(0, .ROOT);
         // tape_writer::write(iter.dom_parser.doc->tape[start_tape_index], next_tape_index(iter), internal::tape_type::ROOT);
-        // tb.tape.items[0] = tb.next_tape_index();
         tb.write(iter, 0, tb.next_tape_index(), .ROOT);
         iter.log_line_fmt("?", "document_end", "open_containers.len {} tape.len {}", .{ iter.parser.open_containers.items.len, tb.tape.items.len });
         return tb.append(iter, 0, .ROOT);
@@ -1229,6 +1214,7 @@ pub const TapeBuilder = struct {
 const DEFAULT_MAX_DEPTH = 1024;
 const STEP_SIZE = 64;
 const STREAMING = false;
+const SIMDJSON_PADDING = 32;
 
 pub const Parser = struct {
     filename: []const u8,
@@ -1239,55 +1225,74 @@ pub const Parser = struct {
     next_structural_index: u32 = 0,
     doc: Document,
     indexer: StructuralIndexer,
-    stream_source: std.io.StreamSource,
     open_containers: std.ArrayListUnmanaged(OpenContainerInfo), //std.MultiArrayList(OpenContainerInfo),
     max_depth: u16,
     // n_structural_indexes: usize = 0,
+    bytes: []u8 = &[_]u8{},
 
     const Options = struct {
         max_depth: u16 = DEFAULT_MAX_DEPTH,
     };
 
-    pub fn initFile(allocator: *mem.Allocator, file: std.fs.File, filename: []const u8, options: Options) !Parser {
-        return Parser{
+    pub fn initFile(allocator: *mem.Allocator, filename: []const u8, options: Options) !Parser {
+        var parser = Parser{
             .filename = filename,
             .allocator = allocator,
             .doc = Document.init(),
             .indexer = try StructuralIndexer.init(allocator, std.mem.page_size),
-            .stream_source = std.io.StreamSource{ .file = file },
             .open_containers = std.ArrayListUnmanaged(OpenContainerInfo){},
             .max_depth = options.max_depth,
         };
+        const len = try parser.read_file(filename);
+        try parser.doc.allocate(allocator, len);
+        return parser;
     }
 
     pub fn initFixedBuffer(allocator: *mem.Allocator, input: []const u8, options: Options) !Parser {
-        return Parser{
+        var parser = Parser{
             .filename = "<fixed buffer>",
             .allocator = allocator,
             .doc = Document.init(),
             .indexer = try StructuralIndexer.init(allocator, std.mem.page_size),
-            .stream_source = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(input) },
+            .bytes = &[_]u8{},
             .open_containers = std.ArrayListUnmanaged(OpenContainerInfo){}, // std.MultiArrayList(OpenContainerInfo){},
             .max_depth = options.max_depth,
         };
+        const len = try std.math.cast(u32, input.len);
+        const paddedlen = try std.math.add(u32, len, SIMDJSON_PADDING);
+        parser.bytes = try parser.allocator.alloc(u8, paddedlen);
+        mem.copy(u8, parser.bytes, input);
+
+        // We write zeroes in the padded region to avoid having uninitized
+        // garbage. If nothing else, garbage getting read might trigger a
+        // warning in a memory checking.
+        std.mem.set(u8, parser.bytes[len..], 0);
+        try parser.doc.allocate(allocator, input.len);
+        return parser;
     }
 
-    pub fn initStreamSource(allocator: *mem.Allocator, stream_source: std.io.StreamSource, options: Options) !Parser {
-        return Parser{
-            .filename = "<stream source>",
-            .allocator = allocator,
-            .doc = Document.init(),
-            .indexer = try StructuralIndexer.init(allocator, std.mem.page_size),
-            .stream_source = stream_source,
-            .open_containers = std.ArrayListUnmanaged(OpenContainerInfo){}, // std.MultiArrayList(OpenContainerInfo){},
-            .max_depth = options.max_depth,
-        };
+    fn read_file(parser: *Parser, filename: []const u8) !usize {
+        var f = try std.fs.cwd().openFile(filename, .{ .read = true });
+        defer f.close();
+        const len = try std.math.cast(u32, try f.getEndPos());
+        if (parser.bytes.len < len) {
+            const paddedlen = try std.math.add(u32, len, SIMDJSON_PADDING);
+            parser.bytes = try parser.allocator.realloc(parser.bytes, paddedlen);
+            const nbytes = try f.read(parser.bytes);
+            if (nbytes < len) return error.IO_ERROR;
+            // We write zeroes in the padded region to avoid having uninitized
+            // garbage. If nothing else, garbage getting read might trigger a
+            // warning in a memory checking.
+            std.mem.set(u8, parser.bytes[len..], 0);
+        }
+        return len;
     }
 
     pub fn deinit(parser: *Parser) void {
         parser.indexer.bit_indexer.tail.deinit(parser.allocator);
         parser.open_containers.deinit(parser.allocator);
         parser.doc.deinit(parser.allocator);
+        parser.allocator.free(parser.bytes);
     }
 
     inline fn find_escaped(parser: *Parser, backslash_: u64) u64 {
@@ -1325,12 +1330,12 @@ pub const Parser = struct {
         //
         const ones: u64x2 = [1]u64{std.math.maxInt(u64)} ** 2;
         var in_string = carrylessMul(.{ quote, 0 }, ones)[0];
-        if (debug) println("{b:0>64} | quote a", .{@bitReverse(u64, quote)});
+        // if (debug) println("{b:0>64} | quote a", .{@bitReverse(u64, quote)});
         // if (debug) println("{b:0>64} | ones[0]", .{@bitReverse(u64, ones[0])});
-        if (debug) println("{b:0>64} | in_string a", .{@bitReverse(u64, in_string)});
-        if (debug) println("{b:0>64} | prev_in_string a", .{@bitReverse(u64, parser.prev_in_string)});
+        // if (debug) println("{b:0>64} | in_string a", .{@bitReverse(u64, in_string)});
+        // if (debug) println("{b:0>64} | prev_in_string a", .{@bitReverse(u64, parser.prev_in_string)});
         in_string ^= parser.prev_in_string;
-        if (debug) println("{b:0>64} | in_string b", .{@bitReverse(u64, in_string)});
+        // if (debug) println("{b:0>64} | in_string b", .{@bitReverse(u64, in_string)});
 
         //
         // Check if we're still in a string at the end of the box so the next block will know
@@ -1358,28 +1363,24 @@ pub const Parser = struct {
     }
 
     fn stage1(parser: *Parser) !void {
-        const end_pos = try parser.stream_source.getEndPos();
+        const end_pos = parser.bytes.len;
         const end_pos_minus_step = if (end_pos > STEP_SIZE) end_pos - STEP_SIZE else 0;
 
-        // var i: u8 = 0;
-        var read_buf: [64]u8 = undefined;
-        var pos: u64 = undefined;
-        while (true) {
-            pos = try parser.stream_source.getPos();
-            if (pos >= end_pos_minus_step) break;
+        var pos: u32 = 0;
+        while (pos < end_pos_minus_step) : (pos += STEP_SIZE) {
             // println("i {} pos {}", .{ i, pos });
-            _ = try parser.stream_source.read(&read_buf);
-            try parser.indexer.step(read_buf, parser, pos);
+            // _ = try parser.bytes.read(&read_buf);
+            const read_buf = parser.bytes[pos..][0..STEP_SIZE];
+            try parser.indexer.step(read_buf.*, parser, pos);
             // for (blocks) |block| {
             //     println("{b:0>64} | characters.whitespace", .{@bitReverse(u64, block.characters.whitespace)});
             //     println("{b:0>64} | characters.op", .{@bitReverse(u64, block.characters.op)});
             //     println("{b:0>64} | in_string", .{@bitReverse(u64, block.strings.in_string)});
             // }
-            // i += 1;
-            // if (i > 10) break;
         }
+        var read_buf: [STEP_SIZE]u8 = undefined;
         std.mem.set(u8, &read_buf, 0x20);
-        _ = try parser.stream_source.read(&read_buf);
+        std.mem.copy(u8, &read_buf, parser.bytes[pos..]);
         println("final pos {} ", .{pos});
         try parser.indexer.step(read_buf, parser, pos);
         try parser.indexer.finish(parser, pos + 64, end_pos, STREAMING);
@@ -1405,27 +1406,18 @@ pub fn main() !u8 {
     var parser: Parser = undefined;
 
     if (os.argv.len == 1) {
-        // if (os.argv.len < 2) {
-        //     std.log.err("Please specify at least one file name. ", .{});
-        //     return 1;
         var stdin = std.io.getStdIn().reader();
         const input = try stdin.readAllAlloc(allr, std.math.maxInt(u32));
         parser = try Parser.initFixedBuffer(allr, input, .{});
     } else if (os.argv.len == 2) {
         const filename = std.mem.span(os.argv[1]);
-
-        var file = try std.fs.cwd().openFile(filename, .{ .read = true });
-        parser = try Parser.initFile(allr, file, filename, .{});
+        parser = try Parser.initFile(allr, filename, .{});
     } else {
         std.log.err("Too many arguments.  Please provide input via filename or stdin", .{});
         return 1;
     }
 
-    defer if (parser.stream_source == .file)
-        parser.stream_source.file.close()
-    else if (parser.stream_source == .const_buffer)
-        allr.free(parser.stream_source.const_buffer.buffer);
-
+    defer parser.deinit();
     try parser.parse();
     // catch |err| switch (err) {
     //     // error.EndOfStream => {},

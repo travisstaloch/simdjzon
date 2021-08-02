@@ -10,43 +10,30 @@ const Iterator = main.Iterator;
 const TapeBuilder = main.TapeBuilder;
 const TapeType = main.TapeType;
 
-fn INVALID_NUMBER(src: *std.io.StreamSource) Error {
+fn INVALID_NUMBER(src: [*]const u8) Error {
     _ = src;
     return error.NUMBER_ERROR;
 }
 
 pub fn parse_number(
-    value: u8,
+    src: [*]const u8,
     iter: *Iterator,
     tb: *TapeBuilder,
 ) Error!void {
-    const negative = value == '-';
-    const src = &iter.parser.stream_source;
-    const start_digits_pos = (try src.getPos()) + @boolToInt(negative);
+    const negative = src[0] == '-';
+    var p = src + @boolToInt(negative);
+
     //
     // Parse the integer part.
     //
     // PERF NOTE: we don't use is_made_of_eight_digits_fast because large integers like 123456789 are rare
-
+    const start_digits = p;
     var i: u64 = 0;
 
-    var buf: [1]u8 = .{value};
-    const first_digit = if (!negative) value else blk: {
-        const nbytes = try src.read(&buf);
-        if (nbytes != 0)
-            break :blk buf[0]
-        else
-            return INVALID_NUMBER(src);
-    };
-    while (true) {
-        if (!parse_digit(u64, buf[0], &i))
-            break;
-        const nbytes = try src.read(&buf);
-        if (nbytes == 0) break;
-    }
-    var digit_count = (try src.getPos()) - start_digits_pos;
+    while (parse_digit(u64, p[0], &i)) : (p += 1) {}
+    var digit_count = (@ptrToInt(p) - @ptrToInt(start_digits)) / 8;
     // println("parse_digit i {} digit_count {}", .{ i, digit_count });
-    if (digit_count == 0 or '0' == first_digit) {
+    if (digit_count == 0 or ('0' == start_digits[0] and digit_count > 1)) {
         return INVALID_NUMBER(src);
     }
 

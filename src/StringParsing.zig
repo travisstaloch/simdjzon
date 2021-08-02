@@ -1,6 +1,7 @@
 const std = @import("std");
 const mem = std.mem;
 usingnamespace @import("vector_types.zig");
+const _mm256_storeu_si256 = @import("llvm_intrinsics.zig")._mm256_storeu_si256;
 
 const escape_map = [256]u8{
     0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 0x0.
@@ -73,38 +74,35 @@ inline fn handle_unicode_codepoint2(dst: []u8) !bool {
     return offset > 0;
 }
 
-inline fn handle_unicode_codepoint(src_ptr: []const u8, dst_ptr: []u8) bool {
+inline fn handle_unicode_codepoint(src_ptr: *[*]const u8, dst_ptr: *[*]u8) bool {
     // jsoncharutils::hex_to_u32_nocheck fills high 16 bits of the return value with 1s if the
     // conversion isn't valid; we defer the check for this to inside the
     // multilingual plane check
-    var code_point = CharUtils.hex_to_u32_nocheck(src_ptr[2..]);
-    //   *src_ptr += 6;
-    src_ptr = src_ptr[6..];
+    var code_point = CharUtils.hex_to_u32_nocheck(src_ptr.* + 2);
+    src_ptr.* += 6;
     // check for low surrogate for characters outside the Basic
     // Multilingual Plane.
     if (code_point >= 0xd800 and code_point < 0xdc00) {
-        if ((src_ptr[0] != '\\') or src_ptr[1] != 'u') {
+        if ((src_ptr.*[0] != '\\') or src_ptr.*[1] != 'u') {
             return false;
         }
-        const code_point_2 = CharUtils.hex_to_u32_nocheck(src_ptr[2]);
+        const code_point_2 = CharUtils.hex_to_u32_nocheck(src_ptr.* + 2);
 
         // if the first code point is invalid we will get here, as we will go past
         // the check for being outside the Basic Multilingual plane. If we don't
         // find a \u immediately afterwards we fail out anyhow, but if we do,
         // this check catches both the case of the first code point being invalid
         // or the second code point being invalid.
-        if ((code_point | code_point_2) >> 16) {
+        if ((code_point | code_point_2) >> 16 != 0) {
             return false;
         }
 
         code_point =
             (((code_point - 0xd800) << 10) | (code_point_2 -% 0xdc00)) +% 0x10000;
-        // *src_ptr += 6;
-        src_ptr = src_ptr[6..];
+        src_ptr.* += 6;
     }
-    const offset = CharUtils.codepoint_to_utf8(code_point, dst_ptr);
-    //   *dst_ptr += offset;
-    dst_ptr = dst_ptr[offset..];
+    const offset = CharUtils.codepoint_to_utf8(code_point, dst_ptr.*);
+    dst_ptr.* += offset;
     return offset > 0;
 }
 
@@ -112,38 +110,32 @@ inline fn handle_unicode_codepoint(src_ptr: []const u8, dst_ptr: []u8) bool {
 // * Unescape a string from src to dst, stopping at a final unescaped quote. E.g., if src points at 'joe"', then
 // * dst needs to have four free bytes.
 // *
-pub inline fn parse_string(src: *std.io.StreamSource, buf: *[BackslashAndQuote.BYTES_PROCESSED]u8) !?[]const u8 {
+pub inline fn parse_string(src_: [*]const u8, dst_: [*]u8) ?[*]u8 {
+    var src = src_;
+    var dst = dst_;
     while (true) {
         // Copy the next n bytes, and find the backslash and quote in them.
 
-        var dst = blk: {
-            const nbytes = try src.read(buf);
-            if (nbytes == 0) return error.EndOfStream;
-            break :blk buf.*[0..nbytes];
-        };
-
-        const bs_quote = try BackslashAndQuote.copy_and_find(buf);
+        const bs_quote = try BackslashAndQuote.copy_and_find(src, dst);
 
         // std.log.debug("bs_quote {b}", .{bs_quote});
         // If the next thing is the end quote, copy and return
         if (bs_quote.has_quote_first()) {
             // we encountered quotes first. Move dst to point to quotes and exit
             // std.log.debug("has_quote_first quote_index {} dst.items.len {}", .{ bs_quote.quote_index(), dst.items.len });
-            return dst[0..bs_quote.quote_index()];
+            return dst + bs_quote.quote_index();
         }
         if (bs_quote.has_backslash()) {
             //    find out where the backspace is */
             const bs_dist = bs_quote.backslash_index();
-            // const escape_char = src[bs_dist + 1];
-            const escape_char = dst[bs_dist + 1];
+            const escape_char = src[bs_dist + 1];
             //    we encountered backslash first. Handle backslash */
             if (escape_char == 'u') {
                 //  move src/dst up to the start; they will be further adjusted
                 //    within the unicode codepoint handling code. */
-                // src += bs_dist;
-                // dst += bs_dist;
-                dst = dst[bs_dist..];
-                if (!try handle_unicode_codepoint(dst)) {
+                src += bs_dist;
+                dst += bs_dist;
+                if (!handle_unicode_codepoint(&src, &dst)) {
                     return null;
                 }
             } else {
@@ -157,21 +149,18 @@ pub inline fn parse_string(src: *std.io.StreamSource, buf: *[BackslashAndQuote.B
                 }
                 // std.debug.panic("TODO put escape result into dest", .{});
                 dst[bs_dist] = escape_result;
-                // src += bs_dist + 2;
-                // dst += bs_dist + 1;
+                src += bs_dist + 2;
+                dst += bs_dist + 1;
             }
         } else {
             //   /* they are the same. Since they can't co-occur, it means we
             //    * encountered neither. */
-            // src += BackslashAndQuote.BYTES_PROCESSED;
-            // dst += BackslashAndQuote.BYTES_PROCESSED;
-            const nbytes = try src.read(buf);
-            if (nbytes == 0) return error.EndOfStream;
-            dst = buf[0..nbytes];
+            src += BackslashAndQuote.BYTES_PROCESSED;
+            dst += BackslashAndQuote.BYTES_PROCESSED;
         }
     }
     //   /* can't be reached */
-    return null;
+    unreachable;
 }
 
 pub const BackslashAndQuote = struct {
@@ -179,17 +168,16 @@ pub const BackslashAndQuote = struct {
     quote_bits: u32,
     pub const BYTES_PROCESSED = 32;
 
-    pub inline fn copy_and_find(
-        // src: *std.io.StreamSource,
-        // dst: *std.ArrayListUnmanaged(u8),
-        // allocator: *mem.Allocator,
-        buf: *[BYTES_PROCESSED]u8,
-    ) !BackslashAndQuote {
-        // TODO, should s be init with 0x20 or something?
+    pub inline fn copy_and_find(src: [*]const u8, dst: [*]u8) !BackslashAndQuote {
 
         // std.log.debug("nbytes {} s: '{s}'", .{ nbytes, s[0..nbytes] });
         // try dst.appendSlice(allocator, buf[0..nbytes]);
-        const v: u8x32 = buf.*;
+        const v: u8x32 = src[0..BYTES_PROCESSED].*;
+        // store to dest unconditionally - we can overwrite the bits we don't like later
+        // v.store(dst);
+        // VMOVDQU
+        // _mm256_storeu_si256(dst, v);
+        dst[0..BYTES_PROCESSED].* = v;
         const bs = v == @splat(BYTES_PROCESSED, @as(u8, '\\'));
         const qs = v == @splat(BYTES_PROCESSED, @as(u8, '"'));
         return BackslashAndQuote{ .bs_bits = @ptrCast(*const u32, &bs).*, .quote_bits = @ptrCast(*const u32, &qs).* };
@@ -365,7 +353,7 @@ pub const CharUtils = struct {
         0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
     };
 
-    pub inline fn hex_to_u32_nocheck(src: [4]u8) u32 {
+    pub inline fn hex_to_u32_nocheck(src: [*]const u8) u32 {
         const v1 = digit_to_val32[630 + @as(u16, src[0])];
         const v2 = digit_to_val32[420 + @as(u16, src[1])];
         const v3 = digit_to_val32[210 + @as(u16, src[2])];
@@ -373,7 +361,7 @@ pub const CharUtils = struct {
         return v1 | v2 | v3 | v4;
     }
 
-    pub inline fn codepoint_to_utf8(cp: u32, c: []u8) u3 {
+    pub inline fn codepoint_to_utf8(cp: u32, c: [*]u8) u3 {
         if (cp <= 0x7F) {
             c[0] = @truncate(u8, cp);
             return 1; // ascii
