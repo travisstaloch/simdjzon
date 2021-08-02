@@ -418,20 +418,6 @@ const Block = struct {
     }
 };
 
-fn lteq(comptime T: type, chunks: [2]u8x32, m: T) u64 {
-    //   const simd8<T> mask = simd8<T>::splat(m);
-    //   return  simd8x64<bool>(
-    //     this->chunks[0] <= mask,
-    //     this->chunks[1] <= mask
-    //   ).to_bitmask();
-    const mask = @splat(32, m);
-    const a = chunks[0] <= mask;
-    const b = chunks[1] <= mask;
-    const aint = @as(u64, @ptrCast(*const u32, &a).*);
-    const bint = @as(u64, @ptrCast(*const u32, &b).*) << 32;
-    return aint | bint;
-}
-
 const StructuralIndexer = struct {
     prev_structurals: u64 = 0,
     unescaped_chars_error: u64 = 0,
@@ -483,7 +469,7 @@ const StructuralIndexer = struct {
     fn step(si: *StructuralIndexer, read_buf: [64]u8, parser: *Parser, reader_pos: u64) !void {
         if (STEP_SIZE == 64) {
             const block_1 = nextBlock(parser, read_buf);
-            // std.log.debug("{s}", .{input});
+            // if (debug) println("{b:0>64} | characters.op", .{@bitReverse(u64, block_1.characters.op)});
             try si.next(read_buf, block_1, reader_pos, parser.allocator);
             // TODO: better allocation strategy
             // std.log.debug("stream pos {}", .{try stream.getPos()});
@@ -505,6 +491,7 @@ const StructuralIndexer = struct {
 
         // TODO:
         //   error_code error = scanner.finish();
+        if (parser.prev_in_string != 0) return error.UNCLOSED_STRING;
         //   // We deliberately break down the next expression so that it is
         //   // human readable.
         //   const bool should_we_exit =  partial ?
@@ -518,7 +505,7 @@ const StructuralIndexer = struct {
         }
 
         //   parser.n_structural_indexes = uint32_t(indexer.tail - parser.structural_indexes.get());
-        // parser.n_structural_indexes = si.bit_indexer.tail.items.len;
+        parser.n_structural_indexes = try std.math.cast(u32, si.bit_indexer.tail.items.len);
         // ***
         // * This is related to https://github.com/simdjson/simdjson/issues/906
         // * Basically, we want to make sure that if the parsing continues beyond the last (valid)
@@ -564,6 +551,20 @@ const StructuralIndexer = struct {
         return si.checker.errors();
     }
 
+    fn lteq(comptime T: type, chunks: [2]u8x32, m: T) u64 {
+        //   const simd8<T> mask = simd8<T>::splat(m);
+        //   return  simd8x64<bool>(
+        //     this->chunks[0] <= mask,
+        //     this->chunks[1] <= mask
+        //   ).to_bitmask();
+        const mask = @splat(32, m);
+        const a = chunks[0] <= mask;
+        const b = chunks[1] <= mask;
+        const aint = @as(u64, @ptrCast(*const u32, &a).*);
+        const bint = @as(u64, @ptrCast(*const u32, &b).*) << 32;
+        return aint | bint;
+    }
+
     fn next(si: *StructuralIndexer, input_vec: u8x64, block: Block, reader_pos: u64, allocator: *mem.Allocator) !void {
         const chunks = @bitCast([2]u8x32, input_vec);
         const unescaped = lteq(u8, chunks, 0x1F);
@@ -586,53 +587,6 @@ const StructuralIndexer = struct {
         try si.bit_indexer.write(reader_pos, si.prev_structurals, allocator); // Output *last* iteration's structurals to the parser
         si.prev_structurals = block.structural_start();
         si.unescaped_chars_error |= block.non_quote_inside_string(unescaped);
-    }
-
-    fn step_(si: *StructuralIndexer, reader: anytype, step_idx: u32, parser: *Parser) ![STEP_SIZE / 64]Block {
-        comptime var n: u8 = 0;
-        var result: [STEP_SIZE / 64]Block = undefined;
-        inline while (n < (STEP_SIZE / 64)) : (n += 1) {
-            const bytes_read = try reader.read(&read_buf);
-            if (bytes_read == 0)
-                break
-            else if (bytes_read != 64) std.debug.panic("TODO: bytes_read ({}) != 64 ({})", .{ bytes_read, STEP_SIZE });
-            const input_vec: u8x64 = read_buf[0..64].*;
-            const chunks = @bitCast([2]u8x32, input_vec);
-            println("{s} | input data : len {}", .{ read_buf, bytes_read });
-
-            // TODO: if STEP_SIZE == 128, repeat
-            const unescaped = lteq(u8, chunks, 0x1F);
-            // println("{b:0>64} | unscaped", .{@bitReverse(u64, unescaped)});
-            si.checker.check_next_input(input_vec);
-
-            si.bit_indexer.write(step_idx, si.prev_structurals); // Output *last* iteration's structurals to the parser
-            si.prev_structurals = block.structural_start();
-            const strings = parser.nextStringBlock(input_vec);
-            // identifies the white-space and the structurat characters
-            const characters = CharacterBlock.classify(input_vec);
-
-            // The term "scalar" refers to anything except structural characters and white space
-            // (so letters, numbers, quotes).
-            // We want  follows_scalar to mark anything that follows a non-quote scalar (so letters and numbers).
-            //
-            // A terminal quote should either be followed by a structural character (comma, brace, bracket, colon)
-            // or nothing. However, we still want ' "a string"true ' to mark the 't' of 'true' as a potential
-            // pseudo-structural character just like we would if we had  ' "a string" true '; otherwise we
-            // may need to add an extra check when parsing strings.
-            //
-            // Performance: there are many ways to skin this cat.
-            const nonquote_scalar = characters.scalar() & ~strings.quote;
-            const follows_nonquote_scalar = follows(nonquote_scalar, &parser.prev_scalar);
-            // We are returning a function-local object so either we get a move constructor
-            // or we get copy elision.
-            if (unescaped & strings.in_string != 0) return error.UnescapedCharacters;
-            result[n] = Block{
-                .strings = strings, // strings is a function-local object so either it moves or the copy is elided.
-                .characters = characters,
-                .follows_nonquote_scalar = follows_nonquote_scalar,
-            };
-        }
-        return result;
     }
 };
 
@@ -672,6 +626,10 @@ pub const Iterator = struct {
     inline fn at_beginning(iter: *Iterator) bool {
         // std.log.debug("at-beginning {*}: {}", .{ iter.next_structural, iter.next_structural[0] });
         return iter.next_structural == iter.parser.indexer.bit_indexer.tail.items.ptr;
+    }
+    inline fn at_eof(iter: *Iterator) bool {
+        // std.log.debug("at-beginning {*}: {}", .{ iter.next_structural, iter.next_structural[0] });
+        return @ptrToInt(iter.next_structural) == @ptrToInt(iter.parser.indexer.bit_indexer.tail.items.ptr + iter.parser.n_structural_indexes);
     }
 
     const LOG_EVENT_LEN = 20;
@@ -934,12 +892,16 @@ pub const Iterator = struct {
     inline fn document_end(iter: *Iterator, visitor: *TapeBuilder) Error!void {
         iter.log_end_value("document");
         try visitor.visit_document_end(iter);
-        iter.parser.next_structural_index = try ptr_diff(u32, iter.next_structural + 1, iter.parser.indexer.bit_indexer.tail.items.ptr);
+        iter.parser.next_structural_index = try ptr_diff(
+            u32,
+            iter.next_structural,
+            iter.parser.indexer.bit_indexer.tail.items.ptr,
+        );
 
         // If we didn't make it to the end, it's an error
-        // std.log.debug("next_str_idx {} tail.len {}", .{ iter.parser.next_structural_index, iter.parser.indexer.bit_indexer.tail.items.len - 3 });
-        // have to subtract 3 from tail.items.len because there are 3 additional items added in finish()
-        if (!STREAMING and iter.parser.next_structural_index != iter.parser.indexer.bit_indexer.tail.items.len - 3) {
+        // std.log.debug("next_structural_index {} n_structural_indexes {}", .{ iter.parser.next_structural_index, iter.parser.n_structural_indexes });
+        // have to add because there are 3 additional items added to tail in finish()
+        if (!STREAMING and iter.parser.next_structural_index != iter.parser.n_structural_indexes) {
             iter.log_error("More than one JSON value at the root of the document, or extra characters at the end of the JSON!");
             return error.TAPE_ERROR;
         }
@@ -962,6 +924,7 @@ pub const Iterator = struct {
 
     pub fn walk_document(iter: *Iterator, visitor: *TapeBuilder) !void {
         iter.log_start();
+        if (iter.at_eof()) return error.EMPTY;
         iter.log_start_value("document");
         try visitor.visit_document_start(iter);
         if (iter.parser.bytes.len == 0) return iter.document_end(visitor);
@@ -1029,6 +992,10 @@ pub const TapeBuilder = struct {
         _ = iter;
         // iter.log_line_fmt("", "append", "val {} tt {}", .{ val, tt });
         try tb.tape.append(iter.parser.allocator, val | tt.as_u64());
+    }
+
+    pub inline fn append_double(tb: *TapeBuilder, iter: *Iterator, val: f64) !void {
+        return tb.append2(iter, 0, @bitCast(u64, val), .DOUBLE);
     }
 
     pub inline fn write(tb: *TapeBuilder, iter: *Iterator, idx: usize, val: u64, tt: TapeType) void {
@@ -1241,7 +1208,7 @@ pub const Parser = struct {
     indexer: StructuralIndexer,
     open_containers: std.ArrayListUnmanaged(OpenContainerInfo), //std.MultiArrayList(OpenContainerInfo),
     max_depth: u16,
-    // n_structural_indexes: usize = 0,
+    n_structural_indexes: u32 = 0,
     bytes: []u8 = &[_]u8{},
     input_len: u32 = 0,
 
@@ -1263,6 +1230,8 @@ pub const Parser = struct {
         return parser;
     }
 
+    const ascii_space = 0x20;
+
     pub fn initFixedBuffer(allocator: *mem.Allocator, input: []const u8, options: Options) !Parser {
         var parser = Parser{
             .filename = "<fixed buffer>",
@@ -1281,7 +1250,7 @@ pub const Parser = struct {
         // We write zeroes in the padded region to avoid having uninitized
         // garbage. If nothing else, garbage getting read might trigger a
         // warning in a memory checking.
-        std.mem.set(u8, parser.bytes[parser.input_len..], 0);
+        std.mem.set(u8, parser.bytes[parser.input_len..], ascii_space);
         try parser.doc.allocate(allocator, parser.input_len);
         return parser;
     }
@@ -1298,7 +1267,7 @@ pub const Parser = struct {
             // We write zeroes in the padded region to avoid having uninitized
             // garbage. If nothing else, garbage getting read might trigger a
             // warning in a memory checking.
-            std.mem.set(u8, parser.bytes[len..], 0);
+            std.mem.set(u8, parser.bytes[len..], ascii_space);
         }
         return len;
     }
@@ -1378,13 +1347,12 @@ pub const Parser = struct {
     }
 
     fn stage1(parser: *Parser) !void {
-        const end_pos = parser.bytes.len;
+        const end_pos = parser.input_len;
         const end_pos_minus_step = if (end_pos > STEP_SIZE) end_pos - STEP_SIZE else 0;
 
         var pos: u32 = 0;
         while (pos < end_pos_minus_step) : (pos += STEP_SIZE) {
             // println("i {} pos {}", .{ i, pos });
-            // _ = try parser.bytes.read(&read_buf);
             const read_buf = parser.bytes[pos..][0..STEP_SIZE];
             try parser.indexer.step(read_buf.*, parser, pos);
             // for (blocks) |block| {
@@ -1393,14 +1361,18 @@ pub const Parser = struct {
             //     println("{b:0>64} | in_string", .{@bitReverse(u64, block.strings.in_string)});
             // }
         }
-        var read_buf: [STEP_SIZE]u8 = undefined;
-        std.mem.set(u8, &read_buf, 0x20);
-        std.mem.copy(u8, &read_buf, parser.bytes[pos..]);
+        var read_buf = [1]u8{0x20} ** STEP_SIZE;
+        std.mem.copy(u8, &read_buf, parser.bytes[pos..end_pos]);
+        // std.log.debug("read_buf {d}", .{read_buf});
         try parser.indexer.step(read_buf, parser, pos);
         try parser.indexer.finish(parser, pos + 64, end_pos, STREAMING);
-        if (parser.indexer.bit_indexer.tail.items.len >= 4)
-            // println("final pos {} end_pos {} parser.bytes.len {} tail.last {}", .{ pos, end_pos, parser.bytes.len, parser.indexer.bit_indexer.tail.items[parser.indexer.bit_indexer.tail.items.len - 4] });
-            if (parser.input_len != parser.indexer.bit_indexer.tail.items[parser.indexer.bit_indexer.tail.items.len - 4]) return error.TAPE_ERROR;
+
+        // if (parser.indexer.bit_indexer.tail.items.len >= 4) {
+        //     // TODO: verify all input was processed
+        //     println("final pos {} end_pos {} parser.input_len {} tail.last {}", .{ pos, end_pos, parser.input_len, parser.indexer.bit_indexer.tail.items[parser.indexer.bit_indexer.tail.items.len - 4] });
+        //     println("tail.items {d}", .{parser.indexer.bit_indexer.tail.items});
+        //     if (parser.input_len != parser.indexer.bit_indexer.tail.items[parser.indexer.bit_indexer.tail.items.len - 4]) return error.TAPE_ERROR;
+        // }
     }
 
     fn stage2(parser: *Parser) !void {
