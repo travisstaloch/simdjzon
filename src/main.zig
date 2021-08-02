@@ -32,7 +32,7 @@ const Document = struct {
         };
     }
 
-    pub fn allocate(document: *Document, allocator: *mem.Allocator, capacity: usize) !void {
+    pub fn allocate(document: *Document, allocator: *mem.Allocator, capacity: u32) !void {
         if (capacity == 0) return;
 
         // a pathological input like "[[[[..." would generate capacity tape elements, so
@@ -76,8 +76,10 @@ const BitIndexer = struct {
         // Unfortunately, in other cases,
         // it helps tremendously.
         if (debug) print("{b:0>64} | bits", .{@bitReverse(u64, bits_)});
-        if (bits == 0)
+        if (bits == 0) {
+            if (debug) println("", .{});
             return;
+        }
         const reader_pos = @intCast(i32, reader_pos_ - 64); //  this function is always passed last bits so reader_pos will be ahead by 64
         const cnt = @popCount(u64, bits);
         if (debug) println(", reader_pos {}", .{reader_pos});
@@ -137,7 +139,7 @@ const BitIndexer = struct {
             }
         }
 
-        // std.log.debug("tail.items.len {d} tail {d}", .{ indexer.tail.items.len, indexer.tail.items[indexer.tail.items.len - cnt ..] });
+        // std.log.debug("tail.items.len {d} start_count + cnt {d}", .{ indexer.tail.items.len, start_count + cnt });
         // indexer.tail_pos += cnt;
         indexer.tail.shrinkRetainingCapacity(start_count + cnt);
     }
@@ -565,12 +567,14 @@ const StructuralIndexer = struct {
     fn next(si: *StructuralIndexer, input_vec: u8x64, block: Block, reader_pos: u64, allocator: *mem.Allocator) !void {
         const chunks = @bitCast([2]u8x32, input_vec);
         const unescaped = lteq(u8, chunks, 0x1F);
-        var input: [64]u8 = undefined;
-        std.mem.copy(u8, &input, &@as([64]u8, input_vec));
-        for (input) |*c| {
-            if (c.* == '\n') c.* = '-';
+        if (debug) {
+            var input: [64]u8 = undefined;
+            std.mem.copy(u8, &input, &@as([64]u8, input_vec));
+            for (input) |*c| {
+                if (c.* == '\n') c.* = '-';
+            }
+            println("{s}", .{input});
         }
-        if (debug) println("{s}", .{input});
         // println("{b:0>64} | block.characters.op", .{@bitReverse(u64, block.characters.op)});
         // println("{b:0>64} | block.characters.whitespace", .{@bitReverse(u64, block.characters.whitespace)});
         // println("{b:0>64} | block.string.in_string", .{@bitReverse(u64, block.string.in_string)});
@@ -779,6 +783,10 @@ pub const Iterator = struct {
         _ = iter;
         if (debug) std.log.err("{s}", .{err});
     }
+    fn log_error_fmt(iter: *Iterator, comptime fmt: []const u8, args: anytype) void {
+        _ = iter;
+        if (debug) std.log.err(fmt, args);
+    }
 
     pub fn object_begin(iter: *Iterator, visitor: *TapeBuilder) !void {
         iter.log_start_value("object");
@@ -882,16 +890,14 @@ pub const Iterator = struct {
                     _ = iter.advance();
                     iter.log_value("empty object");
                     try visitor.visit_empty_object(iter);
-                }
-                return iter.object_begin(visitor);
+                } else return iter.object_begin(visitor);
             },
             '[' => {
                 if (iter.peek()[0] == ']') {
                     _ = iter.advance();
                     iter.log_value("empty array");
                     try visitor.visit_empty_array(iter);
-                }
-                return iter.array_begin(visitor);
+                } else return iter.array_begin(visitor);
             },
             else => try visitor.visit_primitive(iter, value),
         }
@@ -917,15 +923,23 @@ pub const Iterator = struct {
         unreachable;
     }
 
+    inline fn ptr_diff(comptime T: type, p1: anytype, p2: anytype) !T {
+        const U = std.meta.Child(@TypeOf(p1));
+        const V = std.meta.Child(@TypeOf(p2));
+        if (@sizeOf(U) != @sizeOf(V)) @compileError("ptr_diff: mismatched child sizes");
+        const diff = @ptrToInt(p1) - @ptrToInt(p2);
+        return std.math.cast(T, diff / (@sizeOf(U)));
+    }
+
     inline fn document_end(iter: *Iterator, visitor: *TapeBuilder) Error!void {
         iter.log_end_value("document");
         try visitor.visit_document_end(iter);
+        iter.parser.next_structural_index = try ptr_diff(u32, iter.next_structural + 1, iter.parser.indexer.bit_indexer.tail.items.ptr);
 
-        //   dom_parser.next_structural_index = uint32_t(next_structural - &dom_parser.structural_indexes[0]);
-
-        // TODO
         // If we didn't make it to the end, it's an error
-        if (!STREAMING and iter.parser.next_structural_index != iter.parser.indexer.bit_indexer.tail.items.len) {
+        // std.log.debug("next_str_idx {} tail.len {}", .{ iter.parser.next_structural_index, iter.parser.indexer.bit_indexer.tail.items.len - 3 });
+        // have to subtract 3 from tail.items.len because there are 3 additional items added in finish()
+        if (!STREAMING and iter.parser.next_structural_index != iter.parser.indexer.bit_indexer.tail.items.len - 3) {
             iter.log_error("More than one JSON value at the root of the document, or extra characters at the end of the JSON!");
             return error.TAPE_ERROR;
         }
@@ -1132,19 +1146,19 @@ pub const TapeBuilder = struct {
     inline fn visit_true_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log_value("true");
         assert(value[0] == 't');
-        if (!try AtomParsing.is_valid_true_atom(value)) return error.T_ATOM_ERROR;
+        if (!try AtomParsing.is_valid_true_atom(value + 1)) return error.T_ATOM_ERROR;
         try tb.append(iter, 0, TapeType.TRUE_VALUE);
     }
     inline fn visit_false_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log_value("false");
         assert(value[0] == 'f');
-        if (!try AtomParsing.is_valid_false_atom(value)) return error.T_ATOM_ERROR;
+        if (!try AtomParsing.is_valid_false_atom(value + 1)) return error.T_ATOM_ERROR;
         try tb.append(iter, 0, TapeType.FALSE_VALUE);
     }
     inline fn visit_null_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log_value("null");
         assert(value[0] == 'n');
-        if (!try AtomParsing.is_valid_null_atom(value)) return error.T_ATOM_ERROR;
+        if (!try AtomParsing.is_valid_null_atom(value + 1)) return error.T_ATOM_ERROR;
         try tb.append(iter, 0, TapeType.NULL_VALUE);
     }
 
@@ -1155,8 +1169,8 @@ pub const TapeBuilder = struct {
             'f' => tb.visit_false_atom(iter, value),
             'n' => tb.visit_null_atom(iter, value),
             '-', '0'...'9' => tb.visit_number(iter, value),
-            else => blk: {
-                iter.log_error("Non-value found when value was expected!");
+            else => |c| blk: {
+                iter.log_error_fmt("Non-value found when value was expected.  Value: '{c}' - (0x{x}:{})", .{ c, c, c });
                 break :blk error.TAPE_ERROR;
             },
         };
@@ -1229,6 +1243,7 @@ pub const Parser = struct {
     max_depth: u16,
     // n_structural_indexes: usize = 0,
     bytes: []u8 = &[_]u8{},
+    input_len: u32 = 0,
 
     const Options = struct {
         max_depth: u16 = DEFAULT_MAX_DEPTH,
@@ -1243,8 +1258,8 @@ pub const Parser = struct {
             .open_containers = std.ArrayListUnmanaged(OpenContainerInfo){},
             .max_depth = options.max_depth,
         };
-        const len = try parser.read_file(filename);
-        try parser.doc.allocate(allocator, len);
+        parser.input_len = try parser.read_file(filename);
+        try parser.doc.allocate(allocator, parser.input_len);
         return parser;
     }
 
@@ -1258,20 +1273,20 @@ pub const Parser = struct {
             .open_containers = std.ArrayListUnmanaged(OpenContainerInfo){}, // std.MultiArrayList(OpenContainerInfo){},
             .max_depth = options.max_depth,
         };
-        const len = try std.math.cast(u32, input.len);
-        const paddedlen = try std.math.add(u32, len, SIMDJSON_PADDING);
+        parser.input_len = try std.math.cast(u32, input.len);
+        const paddedlen = try std.math.add(u32, parser.input_len, SIMDJSON_PADDING);
         parser.bytes = try parser.allocator.alloc(u8, paddedlen);
         mem.copy(u8, parser.bytes, input);
 
         // We write zeroes in the padded region to avoid having uninitized
         // garbage. If nothing else, garbage getting read might trigger a
         // warning in a memory checking.
-        std.mem.set(u8, parser.bytes[len..], 0);
-        try parser.doc.allocate(allocator, input.len);
+        std.mem.set(u8, parser.bytes[parser.input_len..], 0);
+        try parser.doc.allocate(allocator, parser.input_len);
         return parser;
     }
 
-    fn read_file(parser: *Parser, filename: []const u8) !usize {
+    fn read_file(parser: *Parser, filename: []const u8) !u32 {
         var f = try std.fs.cwd().openFile(filename, .{ .read = true });
         defer f.close();
         const len = try std.math.cast(u32, try f.getEndPos());
@@ -1304,9 +1319,9 @@ pub const Parser = struct {
         const even_bits: u64 = 0x5555555555555555;
         const odd_sequence_starts = backslash & ~even_bits & ~follows_escape;
         var sequences_starting_on_even_bits: u64 = undefined;
-        if (debug) println("{b:0>64} | prev_escaped a", .{@bitReverse(u64, parser.prev_escaped)});
+        // if (debug) println("{b:0>64} | prev_escaped a", .{@bitReverse(u64, parser.prev_escaped)});
         parser.prev_escaped = @boolToInt(@addWithOverflow(u64, odd_sequence_starts, backslash, &sequences_starting_on_even_bits));
-        if (debug) println("{b:0>64} | prev_escaped b", .{@bitReverse(u64, parser.prev_escaped)});
+        // if (debug) println("{b:0>64} | prev_escaped b", .{@bitReverse(u64, parser.prev_escaped)});
         const invert_mask = sequences_starting_on_even_bits << 1; // The mask we want to return is the *escaped* bits, not escapes.
 
         // Mask every other backslashed character as an escaped character
@@ -1343,7 +1358,7 @@ pub const Parser = struct {
         // right shift of a signed value expected to be well-defined and standard
         // compliant as of C++20, John Regher from Utah U. says this is fine code
         //
-        if (debug) println("{b:0>64} | prev_in_string a", .{@bitReverse(u64, parser.prev_in_string)});
+        // if (debug) println("{b:0>64} | prev_in_string a", .{@bitReverse(u64, parser.prev_in_string)});
         // if(debug) println("{b:0>64} | @bitCast(i64, in_string) ", .{@bitReverse(i64, @bitCast(i64, in_string))});
         // if(debug) println("{b:0>64} | @bitCast(i64, in_string) >> 63 ", .{@bitReverse(i64, @bitCast(i64, in_string) >> 63)});
         // if(debug) println("{b:0>64} | @bitCast(u64, @bitCast(i64, in_string) >> 63) ", .{@bitReverse(u64, @bitCast(u64, @bitCast(i64, in_string) >> 63))});
@@ -1381,9 +1396,11 @@ pub const Parser = struct {
         var read_buf: [STEP_SIZE]u8 = undefined;
         std.mem.set(u8, &read_buf, 0x20);
         std.mem.copy(u8, &read_buf, parser.bytes[pos..]);
-        println("final pos {} ", .{pos});
         try parser.indexer.step(read_buf, parser, pos);
         try parser.indexer.finish(parser, pos + 64, end_pos, STREAMING);
+        if (parser.indexer.bit_indexer.tail.items.len >= 4)
+            // println("final pos {} end_pos {} parser.bytes.len {} tail.last {}", .{ pos, end_pos, parser.bytes.len, parser.indexer.bit_indexer.tail.items[parser.indexer.bit_indexer.tail.items.len - 4] });
+            if (parser.input_len != parser.indexer.bit_indexer.tail.items[parser.indexer.bit_indexer.tail.items.len - 4]) return error.TAPE_ERROR;
     }
 
     fn stage2(parser: *Parser) !void {
