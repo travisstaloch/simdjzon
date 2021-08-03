@@ -6,6 +6,8 @@ pub fn build(b: *std.build.Builder) void {
     const mode = b.standardReleaseOptions();
 
     const lib = b.addStaticLibrary("zimdjson", "src/main.zig");
+    lib.addCSourceFile("src/utils.c", &[_][]const u8{ "-Wall", "-Wextra", "-Werror", "-O3" });
+    lib.linkLibC();
     lib.setBuildMode(mode);
     lib.install();
 
@@ -19,6 +21,8 @@ pub fn build(b: *std.build.Builder) void {
     const exe = b.addExecutable("zimdjson", "src/main.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
+    exe.addCSourceFile("src/utils.c", &[_][]const u8{ "-Wall", "-Wextra", "-Werror", "-O3" });
+    exe.linkLibC();
     exe.install();
 
     const run_cmd = exe.run();

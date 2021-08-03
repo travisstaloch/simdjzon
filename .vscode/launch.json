@@ -30,7 +30,8 @@
             "program": "${workspaceFolder}/zig-out/bin/zimdjson",
             // "args": ["test/test2.json"],
             "args": [
-                "../JSONTestSuite/test_parsing/y_string_1_2_3_bytes_UTF-8_sequences.json"
+                // "../JSONTestSuite/test_parsing/y_string_1_2_3_bytes_UTF-8_sequences.json",
+                "../JSONTestSuite/test_parsing//y_string_utf8.json",
             ],
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "zig build",

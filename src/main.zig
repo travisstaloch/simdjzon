@@ -5,17 +5,18 @@ const os = std.os;
 const assert = std.debug.assert;
 usingnamespace @import("vector_types.zig");
 usingnamespace @import("llvm_intrinsics.zig");
+usingnamespace @import("c_intrinsics.zig");
 const StringParsing = @import("StringParsing.zig");
 const NumberParsing = @import("NumberParsing.zig");
 const AtomParsing = @import("AtomParsing.zig");
 
 const show_log = true;
-const debug = true;
+const debug = false;
 pub fn println(comptime fmt: []const u8, args: anytype) void {
     print(fmt ++ "\n", args);
 }
 pub fn print(comptime fmt: []const u8, args: anytype) void {
-    if (show_log)
+    if (debug)
         std.debug.print(fmt, args);
     // std.log.debug(fmt, args);
 }
@@ -75,14 +76,14 @@ const BitIndexer = struct {
         // In some instances, the next branch is expensive because it is mispredicted.
         // Unfortunately, in other cases,
         // it helps tremendously.
-        if (debug) print("{b:0>64} | bits", .{@bitReverse(u64, bits_)});
+        print("{b:0>64} | bits", .{@bitReverse(u64, bits_)});
         if (bits == 0) {
-            if (debug) println("", .{});
+            println("", .{});
             return;
         }
         const reader_pos = @intCast(i32, reader_pos_ - 64); //  this function is always passed last bits so reader_pos will be ahead by 64
         const cnt = @popCount(u64, bits);
-        if (debug) println(", reader_pos {}", .{reader_pos});
+        println(", reader_pos {}", .{reader_pos});
         const start_count = indexer.tail.items.len;
 
         // Do the first 8 all together
@@ -203,17 +204,151 @@ const JsonError = error{
 };
 
 const Utf8Checker = struct {
-    err: u8x8 = [1]u8{0} ** 8,
-    prev_input_block: u8x8 = [1]u8{0} ** 8,
-    prev_incomplete: u8x8 = [1]u8{0} ** 8,
+    err: u8x32 = [1]u8{0} ** 32,
+    prev_input_block: u8x32 = [1]u8{0} ** 32,
+    prev_incomplete: u8x32 = [1]u8{0} ** 32,
+
+    fn prev(comptime N: u8, chunk: u8x32, prev_chunk: u8x32) u8x32 {
+        return switch (N) {
+            1 => _prev1(chunk, prev_chunk),
+            2 => _prev2(chunk, prev_chunk),
+            3 => _prev3(chunk, prev_chunk),
+            else => unreachable,
+        };
+    }
+
+    // zig fmt: off
+    inline fn check_special_cases(input: u8x32, prev1: u8x32) u8x32 {
+        // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
+        // Bit 1 = Too Long (ASCII followed by continuation)
+        // Bit 2 = Overlong 3-byte
+        // Bit 4 = Surrogate
+        // Bit 5 = Overlong 2-byte
+        // Bit 7 = Two Continuations
+        const TOO_SHORT: u8 = 1 << 0; // 11______ 0_______
+        // 11______ 11______
+        const TOO_LONG: u8 = 1 << 1; // 0_______ 10______
+        const OVERLONG_3: u8 = 1 << 2; // 11100000 100_____
+        const SURROGATE: u8 = 1 << 4; // 11101101 101_____
+        const OVERLONG_2: u8 = 1 << 5; // 1100000_ 10______
+        const TWO_CONTS: u8 = 1 << 7; // 10______ 10______
+        const TOO_LARGE: u8 = 1 << 3; // 11110100 1001____
+        // 11110100 101_____
+        // 11110101 1001____
+        // 11110101 101_____
+        // 1111011_ 1001____
+        // 1111011_ 101_____
+        // 11111___ 1001____
+        // 11111___ 101_____
+        const TOO_LARGE_1000: u8 = 1 << 6;
+        // 11110101 1000____
+        // 1111011_ 1000____
+        // 11111___ 1000____
+        const OVERLONG_4: u8 = 1 << 6; // 11110000 1000____
+
+        // const byte_1_high = prev1.shr<4>().lookup_16<uint8_t>(
+        const byte_1_high_0 = prev1 >> @splat(32, @as(u3, 4));
+        const tbl1 = [16]u8{
+            // 0_______ ________ <ASCII in byte 1>
+            TOO_LONG, TOO_LONG, TOO_LONG, TOO_LONG,
+            TOO_LONG, TOO_LONG, TOO_LONG, TOO_LONG,
+            // 10______ ________ <continuation in byte 1>
+            TWO_CONTS, TWO_CONTS, TWO_CONTS, TWO_CONTS,
+            // 1100____ ________ <two byte lead in byte 1>
+            TOO_SHORT | OVERLONG_2,
+            // 1101____ ________ <two byte lead in byte 1>
+            TOO_SHORT,
+            // 1110____ ________ <three byte lead in byte 1>
+            TOO_SHORT | OVERLONG_3 | SURROGATE,
+            // 1111____ ________ <four+ byte lead in byte 1>
+            TOO_SHORT | TOO_LARGE | TOO_LARGE_1000 | OVERLONG_4,
+        } ** 2;
+        // const x: [32]u8 = byte_1_high_0;
+        // var y: [32]u8 = undefined;
+        // std.mem.copy(u8, &y, &x);
+        // std.mem.copy(u8, y[8..], &x);
+        const byte_1_high = shuffleEpi8(tbl1, byte_1_high_0);
+
+        const CARRY: u8 = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
+        const byte_1_low0 = prev1 & @splat(32, @as(u8, 0x0F));
+        // const simd8<uint8_t> byte_1_low = (prev1 & 0x0F).lookup_16<uint8_t>(
+        const tbl2 = [16]u8 {
+          // ____0000 ________
+          CARRY | OVERLONG_3 | OVERLONG_2 | OVERLONG_4,
+          // ____0001 ________
+          CARRY | OVERLONG_2,
+          // ____001_ ________
+          CARRY,
+          CARRY,
+
+          // ____0100 ________
+          CARRY | TOO_LARGE,
+          // ____0101 ________
+          CARRY | TOO_LARGE | TOO_LARGE_1000,
+          // ____011_ ________
+          CARRY | TOO_LARGE | TOO_LARGE_1000,
+          CARRY | TOO_LARGE | TOO_LARGE_1000,
+
+          // ____1___ ________
+          CARRY | TOO_LARGE | TOO_LARGE_1000,
+          CARRY | TOO_LARGE | TOO_LARGE_1000,
+          CARRY | TOO_LARGE | TOO_LARGE_1000,
+          CARRY | TOO_LARGE | TOO_LARGE_1000,
+          CARRY | TOO_LARGE | TOO_LARGE_1000,
+          // ____1101 ________
+          CARRY | TOO_LARGE | TOO_LARGE_1000 | SURROGATE,
+          CARRY | TOO_LARGE | TOO_LARGE_1000,
+          CARRY | TOO_LARGE | TOO_LARGE_1000,
+        } ** 2;
+        const byte_1_low = shuffleEpi8(tbl2, byte_1_low0);
+
+        // const simd8<uint8_t> byte_2_high = input.shr<4>().lookup_16<uint8_t>(
+        const byte_2_high_0 = input >> @splat(32, @as(u3, 4));
+        const tbl3 = [16]u8{
+          // ________ 0_______ <ASCII in byte 2>
+          TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
+          TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
+
+          // ________ 1000____
+          TOO_LONG | OVERLONG_2 | TWO_CONTS | OVERLONG_3 | TOO_LARGE_1000 | OVERLONG_4,
+          // ________ 1001____
+          TOO_LONG | OVERLONG_2 | TWO_CONTS | OVERLONG_3 | TOO_LARGE,
+          // ________ 101_____
+          TOO_LONG | OVERLONG_2 | TWO_CONTS | SURROGATE  | TOO_LARGE,
+          TOO_LONG | OVERLONG_2 | TWO_CONTS | SURROGATE  | TOO_LARGE,
+
+          // ________ 11______
+          TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
+    } ** 2;
+        const byte_2_high = shuffleEpi8(tbl3, byte_2_high_0);
+        return (byte_1_high & byte_1_low & byte_2_high);
+    }
+// zig fmt: on
+
+    fn check_multibyte_lengths(input: u8x32, prev_input: u8x32, sc: u8x32) u8x32 {
+        const prev2 = @bitCast(i8x32, prev(2, input, prev_input));
+        const prev3 = @bitCast(i8x32, prev(3, input, prev_input));
+        const must23 = must_be_2_3_continuation(prev2, prev3);
+        // std.log.debug("input {s} prev_input {s} must23 {}", .{ @as([32]u8, input), @as([32]u8, prev_input), must23 });
+        const must23_80 = must23 & @splat(32, @as(u8, 0x80));
+        return must23_80 ^ sc;
+    }
+
+    fn must_be_2_3_continuation(prev2: i8x32, prev3: i8x32) u8x32 {
+        const is_third_byte = _mm512_subs_epu8(prev2, @bitCast(i8x32, @splat(32, @as(u8, 0b11100000 - 1)))); // Only 111_____ will be > 0
+        const is_fourth_byte = _mm512_subs_epu8(prev3, @bitCast(i8x32, @splat(32, @as(u8, 0b11110000 - 1)))); // Only 1111____ will be > 0
+        // Caller requires a bool (all 1's). All values resulting from the subtraction will be <= 64, so signed comparison is fine.
+        const result = mm256_cmpgt_epi8(is_third_byte | is_fourth_byte, @splat(32, @as(i8, 0)));
+        return @bitCast(u8x32, result);
+    }
 
     //
     // Check whether the current bytes are valid UTF-8.
     //
-    inline fn check_utf8_bytes(checker: *Utf8Checker, input: u8x8, prev_input: u8x8) void {
+    inline fn check_utf8_bytes(checker: *Utf8Checker, input: u8x32, prev_input: u8x32) void {
         // Flip prev1...prev3 so we can easily determine if they are 2+, 3+ or 4+ lead bytes
         // (2, 3, 4-byte leads become large positive numbers instead of small negative numbers)
-        const prev1 = input.prev(1, prev_input);
+        const prev1 = prev(1, input, prev_input);
         const sc = check_special_cases(input, prev1);
         checker.err |= check_multibyte_lengths(input, prev_input, sc);
     }
@@ -236,62 +371,50 @@ const Utf8Checker = struct {
     }
 
     inline fn check_next_input(checker: *Utf8Checker, input: u8x64) void {
-        //   if(simdjson_likely(is_ascii(input))) {
+        const NUM_CHUNKS = STEP_SIZE / 32;
+        const chunks = @bitCast([NUM_CHUNKS][32]u8, input);
         if (is_ascii(input)) {
             checker.err |= checker.prev_incomplete;
         } else {
-            const NUM_CHUNKS = STEP_SIZE / 8;
             // you might think that a for-loop would work, but under Visual Studio, it is not good enough.
             // static_assert((simd8x64<uint8_t>::NUM_CHUNKS == 2) || (simd8x64<uint8_t>::NUM_CHUNKS == 4),
-            //     "We support either two or four chunks per 64-byte block.");
-            // if(simd8x64<uint8_t>::NUM_CHUNKS == 2) {
+            // "We support either two or four chunks per 64-byte block.");
             if (NUM_CHUNKS == 2) {
-                const bytes: [64]u8 = input;
-                const chunk0: u8x8 = bytes[0..8].*;
-                const chunk1: u8x8 = bytes[8..16].*;
-                checker.check_utf8_bytes(chunk0, checker.prev_input_block);
-                checker.check_utf8_bytes(chunk1, chunk0);
-                // } else if(simd8x64<uint8_t>::NUM_CHUNKS == 4) {
+                checker.check_utf8_bytes(chunks[0], checker.prev_input_block);
+                checker.check_utf8_bytes(chunks[1], chunks[0]);
             } else if (NUM_CHUNKS == 4) {
-                const bytes: [128]u8 = input;
-                const chunk0: u8x8 = bytes[0..8].*;
-                const chunk1: u8x8 = bytes[8..16].*;
-                const chunk2: u8x8 = bytes[16..32].*;
-                const chunk3: u8x8 = bytes[32..40].*;
-                checker.check_utf8_bytes(chunk0, checker.prev_input_block);
-                checker.check_utf8_bytes(chunk1, chunk0);
-                checker.check_utf8_bytes(chunk2, chunk1);
-                checker.check_utf8_bytes(chunk3, chunk2);
-            }
+                checker.check_utf8_bytes(chunks[0], checker.prev_input_block);
+                checker.check_utf8_bytes(chunks[1], chunks[0]);
+                checker.check_utf8_bytes(chunk[2], chunks[1]);
+                checker.check_utf8_bytes(chunk[3], chunk[2]);
+            } else unreachable;
             // checker.prev_incomplete = is_incomplete(input.chunks[simd8x64<uint8_t>::NUM_CHUNKS-1]);
             // checker.prev_input_block = input.chunks[simd8x64<uint8_t>::NUM_CHUNKS-1];
-            const chunks = @bitCast([if (STEP_SIZE == 64) 8 else 16][8]u8, input);
             checker.prev_incomplete = is_incomplete(chunks[NUM_CHUNKS - 1]);
             checker.prev_input_block = chunks[NUM_CHUNKS - 1];
         }
     }
     // do not forget to call check_eof!
     inline fn errors(checker: Utf8Checker) JsonError!void {
-        const err = @bitCast(u64, checker.err);
+        const err = @reduce(.And, checker.err);
         if (err != 0) return error.UTF8_ERROR;
     }
-    // const error_code = enum {
-    //     UTF8_ERROR,
-    //     SUCCESS,
-    // };
 
     //
     // Return nonzero if there are incomplete multibyte characters at the end of the block:
     // e.g. if there is a 4-byte character, but it's 3 bytes from the end.
     //
-    inline fn is_incomplete(input: u8x8) u8x8 {
-        // If the previous input's last 3 bytes match this, they're too short (they ended at EOF):
-        // ... 1111____ 111_____ 11______
-        const max_array = [32]u8{ 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0b11110000 - 1, 0b11100000 - 1, 0b11000000 - 1 };
-        // const max_value(&max_array[sizeof(max_array)-sizeof(u8x8)]);
-        const max_value: u8x8 = max_array[@sizeOf(@TypeOf(max_array)) - @sizeOf(u8x8) ..][0..8].*;
-        // return input.gt_bits(max_value);
-        return _mm256_subs_epu8(input, max_value);
+    inline fn is_incomplete(input: u8x32) u8x32 {
+        // // If the previous input's last 3 bytes match this, they're too short (they ended at EOF):
+        // // ... 1111____ 111_____ 11______
+        const max_array: [32]u8 = .{
+            255, 255, 255, 255, 255, 255,            255,            255,
+            255, 255, 255, 255, 255, 255,            255,            255,
+            255, 255, 255, 255, 255, 255,            255,            255,
+            255, 255, 255, 255, 255, 0b11110000 - 1, 0b11100000 - 1, 0b11000000 - 1,
+        };
+        const max_value = @splat(32, @bitCast(i8, max_array[@as(i8, @sizeOf(@TypeOf(max_array)) - @sizeOf(u8x32))]));
+        return @bitCast(u8x32, _mm512_subs_epu8(@bitCast(i8x32, input), max_value));
     }
 };
 
@@ -469,7 +592,7 @@ const StructuralIndexer = struct {
     fn step(si: *StructuralIndexer, read_buf: [64]u8, parser: *Parser, reader_pos: u64) !void {
         if (STEP_SIZE == 64) {
             const block_1 = nextBlock(parser, read_buf);
-            // if (debug) println("{b:0>64} | characters.op", .{@bitReverse(u64, block_1.characters.op)});
+            // println("{b:0>64} | characters.op", .{@bitReverse(u64, block_1.characters.op)});
             try si.next(read_buf, block_1, reader_pos, parser.allocator);
             // TODO: better allocation strategy
             // std.log.debug("stream pos {}", .{try stream.getPos()});
@@ -1288,9 +1411,9 @@ pub const Parser = struct {
         const even_bits: u64 = 0x5555555555555555;
         const odd_sequence_starts = backslash & ~even_bits & ~follows_escape;
         var sequences_starting_on_even_bits: u64 = undefined;
-        // if (debug) println("{b:0>64} | prev_escaped a", .{@bitReverse(u64, parser.prev_escaped)});
+        // println("{b:0>64} | prev_escaped a", .{@bitReverse(u64, parser.prev_escaped)});
         parser.prev_escaped = @boolToInt(@addWithOverflow(u64, odd_sequence_starts, backslash, &sequences_starting_on_even_bits));
-        // if (debug) println("{b:0>64} | prev_escaped b", .{@bitReverse(u64, parser.prev_escaped)});
+        // println("{b:0>64} | prev_escaped b", .{@bitReverse(u64, parser.prev_escaped)});
         const invert_mask = sequences_starting_on_even_bits << 1; // The mask we want to return is the *escaped* bits, not escapes.
 
         // Mask every other backslashed character as an escaped character
@@ -1314,12 +1437,12 @@ pub const Parser = struct {
         //
         const ones: u64x2 = [1]u64{std.math.maxInt(u64)} ** 2;
         var in_string = carrylessMul(.{ quote, 0 }, ones)[0];
-        // if (debug) println("{b:0>64} | quote a", .{@bitReverse(u64, quote)});
-        // if (debug) println("{b:0>64} | ones[0]", .{@bitReverse(u64, ones[0])});
-        // if (debug) println("{b:0>64} | in_string a", .{@bitReverse(u64, in_string)});
-        // if (debug) println("{b:0>64} | prev_in_string a", .{@bitReverse(u64, parser.prev_in_string)});
+        // println("{b:0>64} | quote a", .{@bitReverse(u64, quote)});
+        // println("{b:0>64} | ones[0]", .{@bitReverse(u64, ones[0])});
+        // println("{b:0>64} | in_string a", .{@bitReverse(u64, in_string)});
+        // println("{b:0>64} | prev_in_string a", .{@bitReverse(u64, parser.prev_in_string)});
         in_string ^= parser.prev_in_string;
-        // if (debug) println("{b:0>64} | in_string b", .{@bitReverse(u64, in_string)});
+        // println("{b:0>64} | in_string b", .{@bitReverse(u64, in_string)});
 
         //
         // Check if we're still in a string at the end of the box so the next block will know
@@ -1327,10 +1450,10 @@ pub const Parser = struct {
         // right shift of a signed value expected to be well-defined and standard
         // compliant as of C++20, John Regher from Utah U. says this is fine code
         //
-        // if (debug) println("{b:0>64} | prev_in_string a", .{@bitReverse(u64, parser.prev_in_string)});
-        // if(debug) println("{b:0>64} | @bitCast(i64, in_string) ", .{@bitReverse(i64, @bitCast(i64, in_string))});
-        // if(debug) println("{b:0>64} | @bitCast(i64, in_string) >> 63 ", .{@bitReverse(i64, @bitCast(i64, in_string) >> 63)});
-        // if(debug) println("{b:0>64} | @bitCast(u64, @bitCast(i64, in_string) >> 63) ", .{@bitReverse(u64, @bitCast(u64, @bitCast(i64, in_string) >> 63))});
+        // println("{b:0>64} | prev_in_string a", .{@bitReverse(u64, parser.prev_in_string)});
+        // println("{b:0>64} | @bitCast(i64, in_string) ", .{@bitReverse(i64, @bitCast(i64, in_string))});
+        // println("{b:0>64} | @bitCast(i64, in_string) >> 63 ", .{@bitReverse(i64, @bitCast(i64, in_string) >> 63)});
+        // println("{b:0>64} | @bitCast(u64, @bitCast(i64, in_string) >> 63) ", .{@bitReverse(u64, @bitCast(u64, @bitCast(i64, in_string) >> 63))});
         parser.prev_in_string = @bitCast(u64, @bitCast(i64, in_string) >> 63);
         // parser.prev_in_string =  in_string >> 63;
 

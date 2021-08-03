@@ -44,6 +44,11 @@ pub inline fn _mm256_subs_epu8(a: u8x8, b: u8x8) u8x8 {
     return @"llvm.ssub.sat.v8i8"(a, b);
 }
 
+extern fn @"llvm.usub.sat.v32i8"(i8x32, i8x32) i8x32;
+pub inline fn _mm512_subs_epu8(a: i8x32, b: i8x32) i8x32 {
+    return @"llvm.usub.sat.v32i8"(a, b);
+}
+
 extern fn @"llvm.usub.sat.v16i8"(u8x16, u8x16) u8x16;
 pub inline fn _mm_subs_epu8(a: u8x16, b: u8x16) u8x16 {
     return @"llvm.usub.sat.v16i8"(a, b);
@@ -78,13 +83,9 @@ pub inline fn _mm_packus_epi32(a: u32x4, b: u32x4) u16x8 {
     return @"llvm.x86.sse41.packusdw"(a, b);
 }
 
-// extern fn @"icmp"(u8x16, u8x16) u8x16;
-// pub inline fn _mm_cmpeq_epi8(a: u8x16, b: u8x16) u8x16 {
-//     return @"icmp"(a, b);
-// }
-
 // extern fn @"llvm.x86.sse2.mov.dqu"(u8x16, u8x16, [*]u8) void;
 // pub inline fn _mm256_storeu_si256(a: [*]u8, b: u8x32) void {
 //     const chunk: [32]u8 = b;
 //     @"llvm.x86.sse2.mov.dqu"(chunk[0..16].*, chunk[16..32].*, a);
 // }
+
