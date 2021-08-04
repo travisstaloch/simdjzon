@@ -1189,34 +1189,31 @@ pub const TapeBuilder = struct {
         try tb.append(iter, @ptrToInt(tb.current_string_buf_loc) - @ptrToInt(iter.parser.doc.string_buf.items.ptr), .STRING);
         return tb.current_string_buf_loc + @sizeOf(u32);
     }
-    inline fn on_end_string(tb: *TapeBuilder, iter: *Iterator, dst: [*]const u8) !void {
-        const str_length = (try std.math.cast(
+    inline fn on_end_string(tb: *TapeBuilder, iter: *Iterator, dst: [*]u8) !void {
+        const str_len = (try std.math.cast(
             u32,
             @ptrToInt(dst - @ptrToInt(tb.current_string_buf_loc + @sizeOf(u32))),
         ));
-        const str_start = dst - str_length;
-        // println("str_length {} str '{s}'", .{ str_length, str_start[0..str_length] });
+        // println("str_len {} str '{s}'", .{ str_len, (tb.current_string_buf_loc + 4)[0..str_len] });
+
         // TODO check for overflow in case someone has a crazy string (>=4GB?)
         // But only add the overflow check when the document itself exceeds 4GB
         // Currently unneeded because we refuse to parse docs larger or equal to 4GB.
 
-        // @memcpy(current_string_buf_loc, &str_length, @sizeOf(u32));
-        // // NULL termination is still handy if you expect all your strings to
-        // // be NULL terminated? It comes at a small cost
-        // dst.* = 0;
+        // NULL termination is still handy if you expect all your strings to
+        // be NULL terminated? It comes at a small cost
 
-        // TODO change to memcpy with pre-allocated doc.string_buf
-        // iter.log_line_fmt("", "on_string_end", "{s}", .{str_start[0..str_length]});
-        try iter.parser.doc.string_buf.appendSlice(iter.parser.allocator, str_start[0..str_length]);
-        try iter.parser.doc.string_buf.append(iter.parser.allocator, 0);
-        tb.current_string_buf_loc += str_length + 1;
+        // iter.log_line_fmt("", "on_string_end", "{s}", .{str_start[0..str_len]});
+        @memcpy(tb.current_string_buf_loc, mem.asBytes(&str_len), @sizeOf(u32));
+        dst[0] = 0;
+        iter.parser.doc.string_buf.items.len += str_len + 1 + @sizeOf(u32);
+        assert(iter.parser.doc.string_buf.items.len <= iter.parser.doc.string_buf.capacity);
+        tb.current_string_buf_loc += str_len + 1 + @sizeOf(u32);
     }
 
     pub inline fn append2(tb: *TapeBuilder, iter: *Iterator, val: u64, val2: anytype, tt: TapeType) !void {
         try tb.append(iter, val, tt);
         assert(@sizeOf(@TypeOf(val2)) == 8);
-        //   static_assert(sizeof(val2) == sizeof(*next_tape_loc), "Type is not 64 bits!");
-
         try tb.tape.append(iter.parser.allocator, val2);
     }
 
@@ -1554,32 +1551,32 @@ test "tape build" {
     const expecteds = [_]u64{
         TapeType.ROOT.encode_value(37), //  pointing  to 37 (rightafter  last  node) :0
         TapeType.START_OBJECT.encode_value(37 | (8 << 32)), // pointing to 37, length 8  :1
-        TapeType.STRING.as_u64(), // "Width" :2
+        TapeType.STRING.encode_value(6), // "Width" :2
         TapeType.INT64.as_u64(), 800, // :3
-        TapeType.STRING.as_u64(), // "Height" :5
+        TapeType.STRING.encode_value(6), // "Height" :5
         TapeType.INT64.as_u64(), 600, // :6
-        TapeType.STRING.as_u64(), // "Title" :8
-        TapeType.STRING.as_u64(), // "View  from my room" :9
-        TapeType.STRING.as_u64(), // "Url" :10
-        TapeType.STRING.as_u64(), // "http://,ex.com/img.png" :11
-        TapeType.STRING.as_u64(), // "Private" :12
+        TapeType.STRING.encode_value(5), // "Title" :8
+        TapeType.STRING.encode_value(4), // "View  from my room" :9
+        TapeType.STRING.encode_value(3), // "Url" :10
+        TapeType.STRING.encode_value(21), // "http://ex.com/img.png" :11
+        TapeType.STRING.encode_value(7), // "Private" :12
         TapeType.FALSE_VALUE.as_u64(), // :13
-        TapeType.STRING.as_u64(), // "Thumbnail" :14
+        TapeType.STRING.encode_value(9), // "Thumbnail" :14
         TapeType.START_OBJECT.encode_value(25 | (3 << 32)), // 25, length 3 :15
-        TapeType.STRING.as_u64(), // "Url" :16
-        TapeType.STRING.as_u64(), // "http://,ex.com/th.png". :17
-        TapeType.STRING.as_u64(), // "Height" :18
+        TapeType.STRING.encode_value(3), // "Url" :16
+        TapeType.STRING.encode_value(21), // "http://ex.com/th.png". :17
+        TapeType.STRING.encode_value(6), // "Height" :18
         TapeType.INT64.as_u64(), 125, // :19
-        TapeType.STRING.as_u64(), // "Width" :21
+        TapeType.STRING.encode_value(6), // "Width" :21
         TapeType.INT64.as_u64(), 100, // :22
         TapeType.END_OBJECT.encode_value(15), //  pointing  to 15 :24
-        TapeType.STRING.as_u64(), // "array" :25
+        TapeType.STRING.encode_value(5), // "array" :25
         TapeType.START_ARRAY.encode_value(34 | (3 << 32)), //  pointing  to 34 :26
         TapeType.INT64.as_u64(), 116, // :27
         TapeType.INT64.as_u64(), 943, // :29
         TapeType.INT64.as_u64(), 234, // :31
         TapeType.END_ARRAY.encode_value(26), //  pointing  to  26 :33
-        TapeType.STRING.as_u64(), // "Owner" :34
+        TapeType.STRING.encode_value(5), // "Owner" :34
         TapeType.NULL_VALUE.as_u64(), // :35
         TapeType.END_OBJECT.encode_value(1), //  pointing  to  1 :36
         TapeType.ROOT.encode_value(0), //  pointing  to 0 :37
@@ -1589,21 +1586,39 @@ test "tape build" {
     defer parser.deinit();
     try parser.parse();
 
+    // verify doc.string_buf
+    var p = @ptrCast([*:0]u8, parser.doc.string_buf.items.ptr);
+    var j: u8 = 0;
+    const expected_strings: []const []const u8 = &.{
+        "Width",   "Height",    "Title", "View from my room",    "Url",    "http://ex.com/img.png",
+        "Private", "Thumbnail", "Url",   "http://ex.com/th.png", "Height", "Width",
+        "array",   "Owner",
+    };
+    while (@ptrToInt(p) < @ptrToInt(parser.doc.string_buf.items.ptr + parser.doc.string_buf.items.len)) : (j += 1) {
+        const len = mem.bytesAsValue(u32, p[0..4]).*;
+        p += 4;
+        const str = std.mem.span(p);
+        println("{}:{}-'{s}' '{s}'", .{ j, len, str, p[0..10] });
+        try testing.expectEqual(@intCast(u32, str.len), len);
+        try testing.expectEqualStrings(expected_strings[j], str);
+        p += str.len + 1;
+    }
+
     var i: usize = 0;
     while (i < expecteds.len) : (i += 1) {
         const expected = expecteds[i];
         const expected_type = TapeType.from_u64(expected);
         const expected_val = TapeType.extract_value(expected);
-        std.log.debug("{} : expected {s}:{}-{x}", .{ i, @tagName(expected_type), expected_val, expected });
+        // println("{} : expected {s}:{}-{x}", .{ i, @tagName(expected_type), expected_val, expected });
         const tape_item = parser.doc.tape.items[i];
         const tape_type = TapeType.from_u64(tape_item);
         const tape_val = TapeType.extract_value(tape_item);
-        std.log.debug("{} : actual   {s}:{}-{x}", .{ i, @tagName(tape_type), tape_val, tape_item });
-        // std.log.debug("actual {}:{}", .{expected_type, expected_val});
-        // std.log.debug("expected 0x{x} tape_item 0x{x}", .{ expected, tape_item });
+        // println("{} : actual   {s}:{}-{x}", .{ i, @tagName(tape_type), tape_val, tape_item });
+        // println("actual {}:{}", .{expected_type, expected_val});
+        // println("expected 0x{x} tape_item 0x{x}", .{ expected, tape_item });
         try testing.expectEqual(expected_type, tape_type);
 
-        // std.log.debug("expected_val {} tape_val {}", .{ expected_val, tape_val });
+        // println("expected_val {} tape_val {}", .{ expected_val, tape_val });
         if (expected_type != .STRING)
             try testing.expectEqual(expected_val, tape_val);
 
