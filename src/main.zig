@@ -12,7 +12,7 @@ const AtomParsing = @import("AtomParsing.zig");
 
 // pub const log_level: std.log.Level = .debug;
 pub const log_level: std.log.Level = .alert;
-const debug = log_level == .debug;
+var debug = log_level == .debug;
 pub fn println(comptime fmt: []const u8, args: anytype) void {
     print(fmt ++ "\n", args);
 }
@@ -1033,13 +1033,7 @@ pub const Iterator = struct {
 
     inline fn current_container(iter: *Iterator) *OpenContainerInfo {
         // std.log.debug("current_container iter.parser.open_containers.len {} iter.depth {}", .{ iter.parser.open_containers.items.len, iter.depth });
-        // return @ptrCast(
-        //     *OpenContainerInfo,
-        //     // iter.parser.open_containers.items(.open_container)[iter.depth..].ptr,
-        //     iter.parser.open_containers.items[iter.depth..].ptr,
-        // );
         return &iter.parser.open_containers.items[iter.depth];
-        // return iter.parser.open_containers.set(iter.parser.open_containers.len - 1);
     }
     inline fn increment_count(iter: *Iterator) void {
         // we have a key value pair in the object at parser.dom_parser.depth - 1
@@ -1196,10 +1190,12 @@ pub const TapeBuilder = struct {
         return tb.current_string_buf_loc + @sizeOf(u32);
     }
     inline fn on_end_string(tb: *TapeBuilder, iter: *Iterator, dst: [*]const u8) !void {
-        const str_length = try std.math.cast(
+        const str_length = (try std.math.cast(
             u32,
-            @ptrToInt(dst - @ptrToInt(tb.current_string_buf_loc + @sizeOf(u32))) / 8,
-        );
+            @ptrToInt(dst - @ptrToInt(tb.current_string_buf_loc + @sizeOf(u32))),
+        ));
+        const str_start = dst - str_length;
+        // println("str_length {} str '{s}'", .{ str_length, str_start[0..str_length] });
         // TODO check for overflow in case someone has a crazy string (>=4GB?)
         // But only add the overflow check when the document itself exceeds 4GB
         // Currently unneeded because we refuse to parse docs larger or equal to 4GB.
@@ -1208,9 +1204,12 @@ pub const TapeBuilder = struct {
         // // NULL termination is still handy if you expect all your strings to
         // // be NULL terminated? It comes at a small cost
         // dst.* = 0;
-        // tb.current_string_buf_loc = dst + 1;
-        // iter.log_line_fmt("", "end_string", "str {s}", .{str});
-        try iter.parser.doc.string_buf.appendSlice(iter.parser.allocator, dst[0..str_length]);
+
+        // TODO change to memcpy with pre-allocated doc.string_buf
+        // iter.log_line_fmt("", "on_string_end", "{s}", .{str_start[0..str_length]});
+        try iter.parser.doc.string_buf.appendSlice(iter.parser.allocator, str_start[0..str_length]);
+        try iter.parser.doc.string_buf.append(iter.parser.allocator, 0);
+        tb.current_string_buf_loc += str_length + 1;
     }
 
     pub inline fn append2(tb: *TapeBuilder, iter: *Iterator, val: u64, val2: anytype, tt: TapeType) !void {
@@ -1523,6 +1522,7 @@ pub const Parser = struct {
 const allr = testing.allocator;
 pub fn main() !u8 {
     var parser: Parser = undefined;
+    // debug = true;
 
     if (os.argv.len == 1) {
         var stdin = std.io.getStdIn().reader();
@@ -1585,7 +1585,6 @@ test "tape build" {
         TapeType.ROOT.encode_value(0), //  pointing  to 0 :37
     };
 
-    // testing.log_level = .debug;
     var parser = try Parser.initFixedBuffer(allr, input, .{});
     defer parser.deinit();
     try parser.parse();
