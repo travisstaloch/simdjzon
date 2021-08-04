@@ -10,8 +10,9 @@ const StringParsing = @import("StringParsing.zig");
 const NumberParsing = @import("NumberParsing.zig");
 const AtomParsing = @import("AtomParsing.zig");
 
-const show_log = true;
-var debug = false;
+// pub const log_level: std.log.Level = .debug;
+pub const log_level: std.log.Level = .alert;
+const debug = log_level == .debug;
 pub fn println(comptime fmt: []const u8, args: anytype) void {
     print(fmt ++ "\n", args);
 }
@@ -1140,7 +1141,9 @@ pub const TapeBuilder = struct {
     }
 
     pub inline fn skip_double(tb: TapeBuilder, allocator: *mem.Allocator) !void {
-        _ = try tb.tape.addManyAsArray(allocator, 2);
+        _ = tb;
+        _ = allocator;
+        // _ = try tb.tape.addManyAsArray(allocator, 2);
     }
 
     pub inline fn empty_container(tb: *TapeBuilder, iter: *Iterator, start: TapeType, end: TapeType) Error!void {
@@ -1517,7 +1520,6 @@ pub const Parser = struct {
     }
 };
 
-pub const log_level: std.log.Level = .debug;
 const allr = testing.allocator;
 pub fn main() !u8 {
     var parser: Parser = undefined;
@@ -1615,17 +1617,34 @@ test "tape build" {
 }
 
 test "float" {
-    debug = true;
-    var parser = try Parser.initFixedBuffer(allr, "123.456", .{});
-    defer parser.deinit();
-    try parser.parse();
-    try testing.expectEqual(
-        TapeType.DOUBLE.encode_value(0),
-        parser.doc.tape.items[1],
-    );
-    try testing.expectApproxEqAbs(
-        @as(f64, 123.456),
-        @bitCast(f64, parser.doc.tape.items[2]),
-        0.000000001,
-    );
+    {
+        var parser = try Parser.initFixedBuffer(allr, "123.456", .{});
+        defer parser.deinit();
+        try parser.parse();
+        try testing.expectEqual(
+            TapeType.DOUBLE.encode_value(0),
+            parser.doc.tape.items[1],
+        );
+        try testing.expectApproxEqAbs(
+            @as(f64, 123.456),
+            @bitCast(f64, parser.doc.tape.items[2]),
+            0.000000001,
+        );
+    }
+    {
+        var parser = try Parser.initFixedBuffer(allr, "[-0.000000000000000000000000000000000000000000000000000000000000000000000000000001]", .{});
+        defer parser.deinit();
+        try parser.parse();
+        // for (parser.doc.tape.items) |tape_item, i|
+        //     println("{}:{s} {}", .{ i, @tagName(TapeType.from_u64(tape_item)), TapeType.extract_value(tape_item) });
+        try testing.expectEqual(
+            TapeType.DOUBLE.encode_value(0),
+            parser.doc.tape.items[2],
+        );
+        try testing.expectApproxEqAbs(
+            @as(f64, 0.000000000000000000000000000000000000000000000000000000000000000000000000000001),
+            @bitCast(f64, parser.doc.tape.items[3]),
+            std.math.f64_epsilon,
+        );
+    }
 }

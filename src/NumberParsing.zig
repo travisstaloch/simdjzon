@@ -525,7 +525,7 @@ fn decimal_left_shift(h: *Decimal, shift: u6) void {
             h.truncated = true;
         }
         n = quotient;
-        write_index -= 1;
+        write_index -%= 1;
         read_index -= 1;
     }
     while (n > 0) {
@@ -697,6 +697,7 @@ fn from_chars(first_: [*]const u8) f64 {
 // The string parsing itself always succeeds. We know that there is at least
 // one digit.
 fn parse_float_fallback(ptr: [*]const u8, outDouble: *f64) bool {
+    // @setFloatMode(.Optimized);
     outDouble.* = from_chars(ptr);
     // We do not accept infinite values.
 
@@ -708,7 +709,8 @@ fn parse_float_fallback(ptr: [*]const u8, outDouble: *f64) bool {
     //
     // Therefore, fall back to this solution (the extra parens are there
     // to handle that max may be a macro on windows).
-    return !(outDouble.* > std.math.f64_max or outDouble.* < std.math.f64_min);
+    // println("parse_float_fallback {} std.math.f64_min {} std.math.f64_max {} {} {}", .{ outDouble.*, std.math.f64_min, std.math.f64_max, std.math.f64_min < outDouble.*, outDouble.* < std.math.f64_max });
+    return !(outDouble.* > std.math.f64_max or outDouble.* < -std.math.f64_max);
 }
 
 fn write_float(src: [*]const u8, negative: bool, i: u64, start_digits: [*]const u8, digit_count: usize, exponent: i64, writer: *TapeBuilder, iter: *Iterator) !void {
@@ -732,9 +734,9 @@ fn write_float(src: [*]const u8, negative: bool, i: u64, start_digits: [*]const 
         // it, it would force it to be stored in memory, preventing the compiler from picking it apart
         // and putting into registers. i.e. if we pass it as reference, it gets slow.
         // This is what forces the skip_double, as well.
-        const err = slow_float_parsing(src, writer, iter);
-        try writer.skip_double(iter.parser.allocator);
-        if (err) |_| {} else |e| return e;
+        return slow_float_parsing(src, writer, iter);
+        // TLS: don't need to call skip_double(). maybe in the future i'll discover that it would be
+        // faster to pass a copy somewhere and decide to put it back.
     }
     // NOTE: it's weird that the simdjson_unlikely() only wraps half the if, but it seems to get slower any other
     // way we've tried: https://github.com/simdjson/simdjson/pull/990#discussion_r448497331
@@ -941,7 +943,7 @@ inline fn compute_float_64(power: i64, _i: u64, negative: bool, d: *f64) bool {
         // 64-bit least significant bits of the product and with a "high component" corresponding
         // to the 64-bit most significant bits of the product.
         var secondproduct = CharUtils.full_multiplication(i, power_of_five_128[index + 1]);
-        firstproduct.low += secondproduct.high;
+        firstproduct.low +%= secondproduct.high;
         if (secondproduct.high > firstproduct.low) {
             firstproduct.high += 1;
         }
@@ -959,7 +961,7 @@ inline fn compute_float_64(power: i64, _i: u64, negative: bool, d: *f64) bool {
     ///////
     const upperbit = @intCast(u6, upper >> 63);
     var mantissa: u64 = upper >> (upperbit + 9);
-    lz += @intCast(u6, 1 ^ upperbit);
+    lz +%= @intCast(u6, 1 ^ upperbit);
 
     // Here we have mantissa < (1<<54).
     var real_exponent: i64 = exponent - lz;
