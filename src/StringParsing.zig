@@ -201,6 +201,11 @@ pub const BackslashAndQuote = struct {
     }
 };
 
+pub const Value128 = struct {
+    low: u64,
+    high: u64,
+};
+
 pub const CharUtils = struct {
     const digit_to_val32 = [886]u32{
         0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
@@ -429,4 +434,12 @@ pub const CharUtils = struct {
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     };
+
+    pub fn full_multiplication(value1: u64, value2: u64) Value128 {
+        const r = @as(u128, value1) * value2;
+        return .{
+            .low = @truncate(u64, r),
+            .high = @truncate(u64, r >> 64),
+        };
+    }
 };

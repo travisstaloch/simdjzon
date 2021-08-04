@@ -11,7 +11,7 @@ const NumberParsing = @import("NumberParsing.zig");
 const AtomParsing = @import("AtomParsing.zig");
 
 const show_log = true;
-const debug = false;
+var debug = false;
 pub fn println(comptime fmt: []const u8, args: anytype) void {
     print(fmt ++ "\n", args);
 }
@@ -1094,9 +1094,12 @@ pub const TapeType = enum(u8) {
     pub fn from_u64(x: u64) TapeType {
         return std.meta.intToEnum(TapeType, (x & 0xff00000000000000) >> 56) catch .INVALID;
     }
-    pub fn as_u64_value(tt: TapeType, value: u64) u64 {
+    pub fn encode_value(tt: TapeType, value: u64) u64 {
         assert(value <= std.math.maxInt(u56));
         return @as(u64, @enumToInt(tt)) << 56 | value;
+    }
+    pub fn extract_value(item: u64) u64 {
+        return item & 0x00ffffffffffffff;
     }
 };
 
@@ -1134,6 +1137,10 @@ pub const TapeBuilder = struct {
 
     pub inline fn skip(tb: TapeBuilder, allocator: *mem.Allocator) !void {
         _ = try tb.tape.addOne(allocator);
+    }
+
+    pub inline fn skip_double(tb: TapeBuilder, allocator: *mem.Allocator) !void {
+        _ = try tb.tape.addManyAsArray(allocator, 2);
     }
 
     pub inline fn empty_container(tb: *TapeBuilder, iter: *Iterator, start: TapeType, end: TapeType) Error!void {
@@ -1208,8 +1215,6 @@ pub const TapeBuilder = struct {
         assert(@sizeOf(@TypeOf(val2)) == 8);
         //   static_assert(sizeof(val2) == sizeof(*next_tape_loc), "Type is not 64 bits!");
 
-        //   memcpy(next_tape_loc, &val2, sizeof(val2));
-        //   tb.append(iter, val2, t);
         try tb.tape.append(iter.parser.allocator, val2);
     }
 
@@ -1545,8 +1550,8 @@ pub fn main() !u8 {
 test "tape build" {
     const input = @embedFile("../test/test.json");
     const expecteds = [_]u64{
-        TapeType.ROOT.as_u64_value(37), //  pointing  to 37 (rightafter  last  node) :0
-        TapeType.START_OBJECT.as_u64_value(37 | (8 << 32)), //  pointing  to next  tapelocation  37 (first  node  after  thescope) :1
+        TapeType.ROOT.encode_value(37), //  pointing  to 37 (rightafter  last  node) :0
+        TapeType.START_OBJECT.encode_value(37 | (8 << 32)), // pointing to 37, length 8  :1
         TapeType.STRING.as_u64(), // "Width" :2
         TapeType.INT64.as_u64(), 800, // :3
         TapeType.STRING.as_u64(), // "Height" :5
@@ -1558,26 +1563,27 @@ test "tape build" {
         TapeType.STRING.as_u64(), // "Private" :12
         TapeType.FALSE_VALUE.as_u64(), // :13
         TapeType.STRING.as_u64(), // "Thumbnail" :14
-        TapeType.START_OBJECT.as_u64_value(25 | (3 << 32)), //  pointing  to next  tapelocation  25 (first  node  after  thescope) :15
+        TapeType.START_OBJECT.encode_value(25 | (3 << 32)), // 25, length 3 :15
         TapeType.STRING.as_u64(), // "Url" :16
         TapeType.STRING.as_u64(), // "http://,ex.com/th.png". :17
         TapeType.STRING.as_u64(), // "Height" :18
         TapeType.INT64.as_u64(), 125, // :19
         TapeType.STRING.as_u64(), // "Width" :21
         TapeType.INT64.as_u64(), 100, // :22
-        TapeType.END_OBJECT.as_u64_value(15), //  pointing  to  previous  tapelocation  15 (start  of the  scope) :24
+        TapeType.END_OBJECT.encode_value(15), //  pointing  to 15 :24
         TapeType.STRING.as_u64(), // "array" :25
-        TapeType.START_ARRAY.as_u64_value(34 | (3 << 32)), //  pointing  to next  tapelocation  34 (first  node  after  thescope) :26
+        TapeType.START_ARRAY.encode_value(34 | (3 << 32)), //  pointing  to 34 :26
         TapeType.INT64.as_u64(), 116, // :27
         TapeType.INT64.as_u64(), 943, // :29
         TapeType.INT64.as_u64(), 234, // :31
-        TapeType.END_ARRAY.as_u64_value(26), //  pointing  to  previous  tapelocation  26 (start  of the  scope) :33
+        TapeType.END_ARRAY.encode_value(26), //  pointing  to  26 :33
         TapeType.STRING.as_u64(), // "Owner" :34
         TapeType.NULL_VALUE.as_u64(), // :35
-        TapeType.END_OBJECT.as_u64_value(1), //  pointing  to  previous  tapelocation 1 (start  of the  scope) :36
-        TapeType.ROOT.as_u64(), //  pointing  to 0 (start  root) :37
+        TapeType.END_OBJECT.encode_value(1), //  pointing  to  1 :36
+        TapeType.ROOT.encode_value(0), //  pointing  to 0 :37
     };
-    testing.log_level = .debug;
+
+    // testing.log_level = .debug;
     var parser = try Parser.initFixedBuffer(allr, input, .{});
     defer parser.deinit();
     try parser.parse();
@@ -1586,11 +1592,11 @@ test "tape build" {
     while (i < expecteds.len) : (i += 1) {
         const expected = expecteds[i];
         const expected_type = TapeType.from_u64(expected);
-        const expected_val = expected & 0x00ffffffffffffff;
+        const expected_val = TapeType.extract_value(expected);
         std.log.debug("{} : expected {s}:{}-{x}", .{ i, @tagName(expected_type), expected_val, expected });
         const tape_item = parser.doc.tape.items[i];
         const tape_type = TapeType.from_u64(tape_item);
-        const tape_val = tape_item & 0x00ffffffffffffff;
+        const tape_val = TapeType.extract_value(tape_item);
         std.log.debug("{} : actual   {s}:{}-{x}", .{ i, @tagName(tape_type), tape_val, tape_item });
         // std.log.debug("actual {}:{}", .{expected_type, expected_val});
         // std.log.debug("expected 0x{x} tape_item 0x{x}", .{ expected, tape_item });
@@ -1602,7 +1608,24 @@ test "tape build" {
 
         if (expected_type == .INT64) {
             i += 1;
+            println("{s} {}", .{ @tagName(expected_type), parser.doc.tape.items[i] });
             try testing.expectEqual(expecteds[i], parser.doc.tape.items[i]);
         }
     }
+}
+
+test "float" {
+    debug = true;
+    var parser = try Parser.initFixedBuffer(allr, "123.456", .{});
+    defer parser.deinit();
+    try parser.parse();
+    try testing.expectEqual(
+        TapeType.DOUBLE.encode_value(0),
+        parser.doc.tape.items[1],
+    );
+    try testing.expectApproxEqAbs(
+        @as(f64, 123.456),
+        @bitCast(f64, parser.doc.tape.items[2]),
+        0.000000001,
+    );
 }

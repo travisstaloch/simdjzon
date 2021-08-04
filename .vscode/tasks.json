@@ -16,6 +16,22 @@
                 "kind": "build",
                 "isDefault": true
             }
+        },
+        {
+            "label": "zig build test",
+            "type": "shell",
+            "command": "zig",
+            "args": [
+                // "build", "run", "--", "../../../Code/os/serenity/AK/Tests/4chan_catalog.json"
+                // "build", "run", "--", "test.json"
+                // "test", "src/main.zig", "--test-filter", "tape"
+                // "build",  "test",
+            ],
+            "problemMatcher": [],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            }
         }
     ]
 }

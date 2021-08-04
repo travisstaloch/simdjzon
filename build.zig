@@ -4,20 +4,23 @@ pub fn build(b: *std.build.Builder) void {
     // Standard release options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
+    const target = b.standardTargetOptions(.{});
 
     const lib = b.addStaticLibrary("zimdjson", "src/main.zig");
     lib.addCSourceFile("src/utils.c", &[_][]const u8{ "-Wall", "-Wextra", "-Werror", "-O3" });
+    lib.setTarget(target);
     lib.linkLibC();
     lib.setBuildMode(mode);
     lib.install();
 
     var main_tests = b.addTest("src/main.zig");
     main_tests.setBuildMode(mode);
+    main_tests.addCSourceFile("src/utils.c", &[_][]const u8{ "-Wall", "-Wextra", "-Werror", "-O3" });
+    main_tests.linkLibC();
 
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&main_tests.step);
 
-    const target = b.standardTargetOptions(.{});
     const exe = b.addExecutable("zimdjson", "src/main.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
