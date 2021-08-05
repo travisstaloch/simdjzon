@@ -218,7 +218,6 @@ const Utf8Checker = struct {
         };
     }
 
-    // zig fmt: off
     inline fn check_special_cases(input: u8x32, prev1: u8x32) u8x32 {
         // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
         // Bit 1 = Too Long (ASCII followed by continuation)
@@ -251,10 +250,10 @@ const Utf8Checker = struct {
         const byte_1_high_0 = prev1 >> @splat(32, @as(u3, 4));
         const tbl1 = [16]u8{
             // 0_______ ________ <ASCII in byte 1>
-            TOO_LONG, TOO_LONG, TOO_LONG, TOO_LONG,
-            TOO_LONG, TOO_LONG, TOO_LONG, TOO_LONG,
+            TOO_LONG,               TOO_LONG,  TOO_LONG,                           TOO_LONG,
+            TOO_LONG,               TOO_LONG,  TOO_LONG,                           TOO_LONG,
             // 10______ ________ <continuation in byte 1>
-            TWO_CONTS, TWO_CONTS, TWO_CONTS, TWO_CONTS,
+            TWO_CONTS,              TWO_CONTS, TWO_CONTS,                          TWO_CONTS,
             // 1100____ ________ <two byte lead in byte 1>
             TOO_SHORT | OVERLONG_2,
             // 1101____ ________ <two byte lead in byte 1>
@@ -264,67 +263,61 @@ const Utf8Checker = struct {
             // 1111____ ________ <four+ byte lead in byte 1>
             TOO_SHORT | TOO_LARGE | TOO_LARGE_1000 | OVERLONG_4,
         } ** 2;
-        // const x: [32]u8 = byte_1_high_0;
-        // var y: [32]u8 = undefined;
-        // std.mem.copy(u8, &y, &x);
-        // std.mem.copy(u8, y[8..], &x);
         const byte_1_high = shuffleEpi8(tbl1, byte_1_high_0);
-
         const CARRY: u8 = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
         const byte_1_low0 = prev1 & @splat(32, @as(u8, 0x0F));
         // const simd8<uint8_t> byte_1_low = (prev1 & 0x0F).lookup_16<uint8_t>(
-        const tbl2 = [16]u8 {
-          // ____0000 ________
-          CARRY | OVERLONG_3 | OVERLONG_2 | OVERLONG_4,
-          // ____0001 ________
-          CARRY | OVERLONG_2,
-          // ____001_ ________
-          CARRY,
-          CARRY,
+        const tbl2 = [16]u8{
+            // ____0000 ________
+            CARRY | OVERLONG_3 | OVERLONG_2 | OVERLONG_4,
+            // ____0001 ________
+            CARRY | OVERLONG_2,
+            // ____001_ ________
+            CARRY,
+            CARRY,
 
-          // ____0100 ________
-          CARRY | TOO_LARGE,
-          // ____0101 ________
-          CARRY | TOO_LARGE | TOO_LARGE_1000,
-          // ____011_ ________
-          CARRY | TOO_LARGE | TOO_LARGE_1000,
-          CARRY | TOO_LARGE | TOO_LARGE_1000,
+            // ____0100 ________
+            CARRY | TOO_LARGE,
+            // ____0101 ________
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
+            // ____011_ ________
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
 
-          // ____1___ ________
-          CARRY | TOO_LARGE | TOO_LARGE_1000,
-          CARRY | TOO_LARGE | TOO_LARGE_1000,
-          CARRY | TOO_LARGE | TOO_LARGE_1000,
-          CARRY | TOO_LARGE | TOO_LARGE_1000,
-          CARRY | TOO_LARGE | TOO_LARGE_1000,
-          // ____1101 ________
-          CARRY | TOO_LARGE | TOO_LARGE_1000 | SURROGATE,
-          CARRY | TOO_LARGE | TOO_LARGE_1000,
-          CARRY | TOO_LARGE | TOO_LARGE_1000,
+            // ____1___ ________
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
+            // ____1101 ________
+            CARRY | TOO_LARGE | TOO_LARGE_1000 | SURROGATE,
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
         } ** 2;
         const byte_1_low = shuffleEpi8(tbl2, byte_1_low0);
 
         // const simd8<uint8_t> byte_2_high = input.shr<4>().lookup_16<uint8_t>(
         const byte_2_high_0 = input >> @splat(32, @as(u3, 4));
         const tbl3 = [16]u8{
-          // ________ 0_______ <ASCII in byte 2>
-          TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
-          TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
+            // ________ 0_______ <ASCII in byte 2>
+            TOO_SHORT,                                                                    TOO_SHORT,                                                  TOO_SHORT,                                                 TOO_SHORT,
+            TOO_SHORT,                                                                    TOO_SHORT,                                                  TOO_SHORT,                                                 TOO_SHORT,
 
-          // ________ 1000____
-          TOO_LONG | OVERLONG_2 | TWO_CONTS | OVERLONG_3 | TOO_LARGE_1000 | OVERLONG_4,
-          // ________ 1001____
-          TOO_LONG | OVERLONG_2 | TWO_CONTS | OVERLONG_3 | TOO_LARGE,
-          // ________ 101_____
-          TOO_LONG | OVERLONG_2 | TWO_CONTS | SURROGATE  | TOO_LARGE,
-          TOO_LONG | OVERLONG_2 | TWO_CONTS | SURROGATE  | TOO_LARGE,
+            // ________ 1000____
+            TOO_LONG | OVERLONG_2 | TWO_CONTS | OVERLONG_3 | TOO_LARGE_1000 | OVERLONG_4,
+            // ________ 1001____
+            TOO_LONG | OVERLONG_2 | TWO_CONTS | OVERLONG_3 | TOO_LARGE,
+            // ________ 101_____
+            TOO_LONG | OVERLONG_2 | TWO_CONTS | SURROGATE | TOO_LARGE, TOO_LONG | OVERLONG_2 | TWO_CONTS | SURROGATE | TOO_LARGE,
 
-          // ________ 11______
-          TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
-    } ** 2;
+            // ________ 11______
+            TOO_SHORT,                                                                    TOO_SHORT,                                                  TOO_SHORT,                                                 TOO_SHORT,
+        } ** 2;
         const byte_2_high = shuffleEpi8(tbl3, byte_2_high_0);
         return (byte_1_high & byte_1_low & byte_2_high);
     }
-// zig fmt: on
+    // zig fmt: on
 
     fn check_multibyte_lengths(input: u8x32, prev_input: u8x32, sc: u8x32) u8x32 {
         const prev2 = @bitCast(i8x32, prev(2, input, prev_input));
@@ -339,8 +332,8 @@ const Utf8Checker = struct {
         const is_third_byte = _mm512_subs_epu8(prev2, @bitCast(i8x32, @splat(32, @as(u8, 0b11100000 - 1)))); // Only 111_____ will be > 0
         const is_fourth_byte = _mm512_subs_epu8(prev3, @bitCast(i8x32, @splat(32, @as(u8, 0b11110000 - 1)))); // Only 1111____ will be > 0
         // Caller requires a bool (all 1's). All values resulting from the subtraction will be <= 64, so signed comparison is fine.
-        const result = mm256_cmpgt_epi8(is_third_byte | is_fourth_byte, @splat(32, @as(i8, 0)));
-        return @bitCast(u8x32, result);
+        const result = @bitCast(i1x32, (is_third_byte | is_fourth_byte) > @splat(32, @as(i8, 0)));
+        return @bitCast(u8x32, @as(i8x32, result));
     }
 
     //

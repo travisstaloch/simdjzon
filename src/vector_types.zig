@@ -4,6 +4,7 @@ pub const boolx32 = std.meta.Vector(32, bool);
 pub const boolx16 = std.meta.Vector(16, bool);
 pub const boolx8 = std.meta.Vector(8, bool);
 pub const boolx4 = std.meta.Vector(4, bool);
+pub const i1x32 = std.meta.Vector(32, i1);
 pub const i8x8 = std.meta.Vector(8, i8);
 pub const i8x16 = std.meta.Vector(16, i8);
 pub const i8x32 = std.meta.Vector(32, i8);
