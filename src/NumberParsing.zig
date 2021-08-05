@@ -15,6 +15,18 @@ fn INVALID_NUMBER(src: [*]const u8) Error {
     return error.NUMBER_ERROR;
 }
 
+fn WRITE_DOUBLE(VALUE: f64, _: [*]const u8, WRITER: *TapeBuilder, iter: *Iterator) !void {
+    try (WRITER).append_double(iter, VALUE);
+}
+
+fn WRITE_INTEGER(VALUE: u64, _: [*]const u8, WRITER: *TapeBuilder, iter: *Iterator) !void {
+    try (WRITER).append_i64(iter, VALUE);
+}
+
+fn WRITE_UNSIGNED(VALUE: u64, _: [*]const u8, WRITER: *TapeBuilder, iter: *Iterator) !void {
+    try (WRITER).append_u64(iter, VALUE);
+}
+
 pub fn parse_number(
     src: [*]const u8,
     iter: *Iterator,
@@ -65,48 +77,48 @@ pub fn parse_number(
         return;
     }
 
-    // // The longest negative 64-bit number is 19 digits.
-    // // The longest positive 64-bit number is 20 digits.
-    // // We do it this way so we don't trigger this branch unless we must.
-    // const longest_digit_count = if (negative) 19 else 20;
-    // if (digit_count > longest_digit_count) {
-    //     return INVALID_NUMBER(src);
-    // }
-    // if (digit_count == longest_digit_count) {
-    //     if (negative) {
-    //         // Anything negative above INT64_MAX+1 is invalid
-    //         if (i > @as(u64, INT64_MAX) + 1) {
-    //             return INVALID_NUMBER(src);
-    //         }
-    //         WRITE_INTEGER(~i + 1, src, writer, iter);
-    //         if (CharUtils.is_not_structural_or_whitespace(p[0])) {
-    //             return INVALID_NUMBER(src);
-    //         }
-    //         return SUCCESS;
-    //         // Positive overflow check:
-    //         // - A 20 digit number starting with 2-9 is overflow, because 18,446,744,073,709,551,615 is the
-    //         //   biggest uint64_t.
-    //         // - A 20 digit number starting with 1 is overflow if it is less than INT64_MAX.
-    //         //   If we got here, it's a 20 digit number starting with the digit "1".
-    //         // - If a 20 digit number starting with 1 overflowed (i*10+digit), the result will be smaller
-    //         //   than 1,553,255,926,290,448,384.
-    //         // - That is smaller than the smallest possible 20-digit number the user could write:
-    //         //   10,000,000,000,000,000,000.
-    //         // - Therefore, if the number is positive and lower than that, it's overflow.
-    //         // - The value we are looking at is less than or equal to 9,223,372,036,854,775,808 (INT64_MAX).
-    //         //
-    //     } else if (src[0] != '1' or i <= @as(u64, INT64_MAX)) {
-    //         return INVALID_NUMBER(src);
-    //     }
-    // }
+    // The longest negative 64-bit number is 19 digits.
+    // The longest positive 64-bit number is 20 digits.
+    // We do it this way so we don't trigger this branch unless we must.
+    const longest_digit_count: usize = if (negative) 19 else 20;
+    if (digit_count > longest_digit_count) {
+        return INVALID_NUMBER(src);
+    }
+    if (digit_count == longest_digit_count) {
+        if (negative) {
+            // Anything negative above INT64_MAX+1 is invalid
+            if (i > @as(u64, std.math.maxInt(i64)) + 1) {
+                return INVALID_NUMBER(src);
+            }
+            try WRITE_INTEGER(~i + 1, src, tb, iter);
+            if (CharUtils.is_not_structural_or_whitespace(p[0])) {
+                return INVALID_NUMBER(src);
+            }
+            return;
+            // Positive overflow check:
+            // - A 20 digit number starting with 2-9 is overflow, because 18,446,744,073,709,551,615 is the
+            //   biggest uint64_t.
+            // - A 20 digit number starting with 1 is overflow if it is less than INT64_MAX.
+            //   If we got here, it's a 20 digit number starting with the digit "1".
+            // - If a 20 digit number starting with 1 overflowed (i*10+digit), the result will be smaller
+            //   than 1,553,255,926,290,448,384.
+            // - That is smaller than the smallest possible 20-digit number the user could write:
+            //   10,000,000,000,000,000,000.
+            // - Therefore, if the number is positive and lower than that, it's overflow.
+            // - The value we are looking at is less than or equal to 9,223,372,036,854,775,808 (INT64_MAX).
+            //
+        } else if (src[0] != '1' or i <= @as(u64, std.math.maxInt(i64))) {
+            return INVALID_NUMBER(src);
+        }
+    }
 
     // Write unsigned if it doesn't fit in a signed integer.
     if (i > @as(u64, std.math.maxInt(i64))) {
-        // WRITE_UNSIGNED(i, src, writer);
-        try tb.append2(iter, 0, i, .INT64);
+        try WRITE_UNSIGNED(i, src, tb, iter);
+        // try tb.append2(iter, 0, i, .INT64);
     } else {
-        // WRITE_INTEGER(if (negative) (~i + 1) else i, src, writer);
-        try tb.append2(iter, 0, if (negative) (~i +% 1) else i, .INT64);
+        try WRITE_INTEGER(if (negative) (~i +% 1) else i, src, tb, iter);
+        // try tb.append2(iter, 0, if (negative) (~i +% 1) else i, .INT64);
     }
     // std.log.debug("parse number last '{c}'(0x{x}:{})", .{ p[0], p[0], p[0] });
     if (CharUtils.is_not_structural_or_whitespace(p[0]))
@@ -769,9 +781,6 @@ fn write_float(src: [*]const u8, negative: bool, i: u64, start_digits: [*]const 
     try WRITE_DOUBLE(d, src, writer, iter);
 }
 
-fn WRITE_DOUBLE(VALUE: f64, _: [*]const u8, WRITER: *TapeBuilder, iter: *Iterator) !void {
-    try (WRITER).append_double(iter, VALUE);
-}
 const smallest_power = -342;
 const largest_power = 308;
 

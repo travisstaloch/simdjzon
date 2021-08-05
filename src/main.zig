@@ -1119,6 +1119,14 @@ pub const TapeBuilder = struct {
         return tb.append2(iter, 0, @bitCast(u64, val), .DOUBLE);
     }
 
+    pub inline fn append_i64(tb: *TapeBuilder, iter: *Iterator, val: u64) !void {
+        return tb.append2(iter, 0, val, .INT64);
+    }
+
+    pub inline fn append_u64(tb: *TapeBuilder, iter: *Iterator, val: u64) !void {
+        return tb.append2(iter, 0, val, .UINT64);
+    }
+
     pub inline fn write(tb: *TapeBuilder, iter: *Iterator, idx: usize, val: u64, tt: TapeType) void {
         _ = iter;
         // iter.log_line_fmt("", "write", "val {} tt {} idx {}", .{ val, tt, idx });
