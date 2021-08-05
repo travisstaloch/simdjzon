@@ -21,16 +21,22 @@ pub fn print(comptime fmt: []const u8, args: anytype) void {
         std.debug.print(fmt, args);
     // std.log.debug(fmt, args);
 }
-inline fn SIMDJSON_ROUNDUP_N(a: usize, n: usize) usize {
+fn print_vec(name: []const u8, vec: u8x32) void {
+    println("{s}: {any}", .{ name, @as([32]u8, vec) });
+}
+
+inline fn SIMDJSON_ROUNDUP_N(a: anytype, n: @TypeOf(a)) @TypeOf(a) {
     return (a + (n - 1)) & ~(n - 1);
 }
 const Document = struct {
     tape: std.ArrayListUnmanaged(u64),
-    string_buf: std.ArrayListUnmanaged(u8),
+    string_buf: []u8,
+    string_buf_cap: u32,
     pub fn init() Document {
         return .{
             .tape = std.ArrayListUnmanaged(u64){},
-            .string_buf = std.ArrayListUnmanaged(u8){},
+            .string_buf = &[_]u8{},
+            .string_buf_cap = 0,
         };
     }
 
@@ -45,20 +51,21 @@ const Document = struct {
         const tape_capacity = SIMDJSON_ROUNDUP_N(capacity + 3, 64);
         // a document with only zero-length strings... could have capacity/3 string
         // and we would need capacity/3 * 5 bytes on the string buffer
-        const string_capacity = SIMDJSON_ROUNDUP_N(5 * capacity / 3 + SIMDJSON_PADDING, 64);
+        document.string_buf_cap = SIMDJSON_ROUNDUP_N(5 * capacity / 3 + SIMDJSON_PADDING, 64);
         //   string_buf.reset( new (std::nothrow) uint8_t[string_capacity]);
         //   tape.reset(new (std::nothrow) uint64_t[tape_capacity]);
         errdefer {
-            document.string_buf.deinit(allocator);
+            allocator.free(document.string_buf);
             document.tape.deinit(allocator);
         }
         try document.tape.ensureTotalCapacity(allocator, tape_capacity);
-        try document.string_buf.ensureTotalCapacity(allocator, string_capacity);
+        document.string_buf = try allocator.alloc(u8, document.string_buf_cap);
+        document.string_buf.len = 0;
     }
 
     pub fn deinit(doc: *Document, allocator: *mem.Allocator) void {
         doc.tape.deinit(allocator);
-        doc.string_buf.deinit(allocator);
+        allocator.free(doc.string_buf);
     }
 };
 
@@ -390,7 +397,7 @@ const Utf8Checker = struct {
     }
     // do not forget to call check_eof!
     inline fn errors(checker: Utf8Checker) JsonError!void {
-        const err = @reduce(.And, checker.err);
+        const err = @reduce(.Or, checker.err);
         if (err != 0) return error.UTF8_ERROR;
     }
 
@@ -1098,7 +1105,7 @@ pub const TapeBuilder = struct {
     pub fn init(doc: *Document) TapeBuilder {
         return .{
             .tape = &doc.tape,
-            .current_string_buf_loc = doc.string_buf.items.ptr,
+            .current_string_buf_loc = doc.string_buf.ptr,
         };
     }
 
@@ -1186,8 +1193,8 @@ pub const TapeBuilder = struct {
     }
 
     inline fn on_start_string(tb: *TapeBuilder, iter: *Iterator) ![*]u8 {
-        // iter.log_line_fmt("", "start_string", "iter.parser.doc.string_buf.items.len {}", .{iter.parser.doc.string_buf.items.len});
-        try tb.append(iter, @ptrToInt(tb.current_string_buf_loc) - @ptrToInt(iter.parser.doc.string_buf.items.ptr), .STRING);
+        // iter.log_line_fmt("", "start_string", "iter.parser.doc.string_buf.len {}", .{iter.parser.doc.string_buf.len});
+        try tb.append(iter, @ptrToInt(tb.current_string_buf_loc) - @ptrToInt(iter.parser.doc.string_buf.ptr), .STRING);
         return tb.current_string_buf_loc + @sizeOf(u32);
     }
     inline fn on_end_string(tb: *TapeBuilder, iter: *Iterator, dst: [*]u8) !void {
@@ -1207,8 +1214,9 @@ pub const TapeBuilder = struct {
         // iter.log_line_fmt("", "on_string_end", "{s}", .{str_start[0..str_len]});
         @memcpy(tb.current_string_buf_loc, mem.asBytes(&str_len), @sizeOf(u32));
         dst[0] = 0;
-        iter.parser.doc.string_buf.items.len += str_len + 1 + @sizeOf(u32);
-        assert(iter.parser.doc.string_buf.items.len <= iter.parser.doc.string_buf.capacity);
+        iter.parser.doc.string_buf.len += str_len + 1 + @sizeOf(u32);
+        // println("buf.len {} buf.cap {}", .{ iter.parser.doc.string_buf.len, iter.parser.doc.string_buf_cap });
+        assert(iter.parser.doc.string_buf.len <= iter.parser.doc.string_buf_cap);
         tb.current_string_buf_loc += str_len + 1 + @sizeOf(u32);
     }
 
@@ -1517,18 +1525,20 @@ pub const Parser = struct {
     }
 };
 
-const allr = testing.allocator;
 pub fn main() !u8 {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = &arena.allocator;
     var parser: Parser = undefined;
-    // debug = true;
+    debug = true;
 
     if (os.argv.len == 1) {
         var stdin = std.io.getStdIn().reader();
-        const input = try stdin.readAllAlloc(allr, std.math.maxInt(u32));
-        parser = try Parser.initFixedBuffer(allr, input, .{});
+        const input = try stdin.readAllAlloc(allocator, std.math.maxInt(u32));
+        parser = try Parser.initFixedBuffer(allocator, input, .{});
     } else if (os.argv.len == 2) {
         const filename = std.mem.span(os.argv[1]);
-        parser = try Parser.initFile(allr, filename, .{});
+        parser = try Parser.initFile(allocator, filename, .{});
     } else {
         std.log.err("Too many arguments.  Please provide input via filename or stdin", .{});
         return 1;
@@ -1547,6 +1557,7 @@ pub fn main() !u8 {
     return 0;
 }
 
+const allr = testing.allocator;
 test "tape build" {
     const input = @embedFile("../test/test.json");
     const expecteds = [_]u64{
@@ -1588,14 +1599,14 @@ test "tape build" {
     try parser.parse();
 
     // verify doc.string_buf
-    var p = @ptrCast([*:0]u8, parser.doc.string_buf.items.ptr);
+    var p = @ptrCast([*:0]u8, parser.doc.string_buf.ptr);
     var j: u8 = 0;
     const expected_strings: []const []const u8 = &.{
         "Width",   "Height",    "Title", "View from my room",    "Url",    "http://ex.com/img.png",
         "Private", "Thumbnail", "Url",   "http://ex.com/th.png", "Height", "Width",
         "array",   "Owner",
     };
-    while (@ptrToInt(p) < @ptrToInt(parser.doc.string_buf.items.ptr + parser.doc.string_buf.items.len)) : (j += 1) {
+    while (@ptrToInt(p) < @ptrToInt(parser.doc.string_buf.ptr + parser.doc.string_buf.len)) : (j += 1) {
         const len = mem.bytesAsValue(u32, p[0..4]).*;
         p += 4;
         const str = std.mem.span(p);
