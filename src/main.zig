@@ -65,7 +65,8 @@ const Document = struct {
 
     pub fn deinit(doc: *Document, allocator: *mem.Allocator) void {
         doc.tape.deinit(allocator);
-        allocator.free(doc.string_buf);
+        doc.string_buf.len = doc.string_buf_cap;
+        allocator.free(doc.string_buf[0..doc.string_buf_cap]);
     }
 };
 
