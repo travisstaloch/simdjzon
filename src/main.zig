@@ -1678,7 +1678,7 @@ const Object = struct {
         var json_pointer = _json_pointer[1..];
         const slash = mem.indexOfScalar(u8, json_pointer, '/');
         const key = json_pointer[0 .. slash orelse json_pointer.len];
-        // Grab the child with the given key
+        // Find the child with the given key
         var child: Element = undefined;
 
         // TODO escapes
@@ -1703,12 +1703,12 @@ const Object = struct {
         // } else {
         //     child = o.at_key(key) catch return child; // we do not continue if there was an error
         // }
-        child = o.at_key(key) orelse return child;
+        child = o.at_key(key) orelse return error.INVALID_JSON_POINTER;
 
         // If there is a /, we have to recurse and look up more of the path
-        if (slash != null) {
+        if (slash != null)
             child = try child.at_pointer(json_pointer[slash.?..]);
-        }
+
         return child;
     }
 };
@@ -2065,6 +2065,10 @@ test "json pointer" {
     try parser.parse();
     const b0 = try parser.element().at_pointer("/a/b/0");
     try testing.expectEqual(@as(i64, 1), try b0.get_int64());
+    const b2 = try parser.element().at_pointer("/a/b/2");
+    try testing.expectEqual(@as(i64, 3), try b2.get_int64());
+    try testing.expectError(error.INVALID_JSON_POINTER, parser.element().at_pointer("/a/b/3"));
+    try testing.expectError(error.INVALID_JSON_POINTER, parser.element().at_pointer("/c/b"));
 }
 
 pub fn main2() !u8 {
