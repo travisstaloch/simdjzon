@@ -1335,7 +1335,7 @@ pub const Parser = struct {
         try parser.doc.allocate(allocator, capacity);
         const max_structures = SIMDJSON_ROUNDUP_N(capacity, 64) + 2 + 7;
         try parser.indexer.bit_indexer.tail.ensureTotalCapacity(allocator, max_structures);
-        try parser.open_containers.ensureTotalCapacity(allocator, DEFAULT_MAX_DEPTH);
+        try parser.open_containers.ensureTotalCapacity(allocator, options.max_depth);
         return parser;
     }
 
@@ -1364,7 +1364,7 @@ pub const Parser = struct {
         std.mem.set(u8, parser.bytes[capacity..], ascii_space);
         try parser.doc.allocate(allocator, capacity);
         try parser.indexer.bit_indexer.tail.ensureTotalCapacity(allocator, max_structures);
-        try parser.open_containers.ensureTotalCapacity(allocator, DEFAULT_MAX_DEPTH);
+        try parser.open_containers.ensureTotalCapacity(allocator, options.max_depth);
         return parser;
     }
 
