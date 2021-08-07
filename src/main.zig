@@ -872,7 +872,61 @@ pub const Iterator = struct {
         if (debug) std.log.err(fmt, args);
     }
 
-    inline fn object_begin(iter: *Iterator, visitor: *TapeBuilder) !void {
+    const State = enum {
+        object_begin,
+        object_field,
+        object_continue,
+        scope_end,
+        array_begin,
+        array_value,
+        array_continue,
+        document_end,
+    };
+
+    pub fn walk_document(iter: *Iterator, visitor: *TapeBuilder) !void {
+        iter.log_start();
+        if (iter.at_eof()) return error.EMPTY;
+        iter.log_start_value("document");
+        try visitor.visit_document_start(iter);
+        if (iter.parser.bytes.len == 0) return iter.document_end(visitor);
+
+        const value = iter.advance();
+        var state: State = blk: {
+            switch (value[0]) {
+                '{' => {
+                    if (iter.peek()[0] == '}') {
+                        _ = iter.advance();
+                        iter.log_value("empty object");
+                        try visitor.visit_empty_object(iter);
+                    } else break :blk .object_begin;
+                },
+                '[' => {
+                    if (iter.peek()[0] == ']') {
+                        _ = iter.advance();
+                        iter.log_value("empty array");
+                        try visitor.visit_empty_array(iter);
+                    } else break :blk .array_begin;
+                },
+                else => try visitor.visit_root_primitive(iter, value),
+            }
+            break :blk .document_end;
+        };
+
+        while (true) {
+            state = switch (state) {
+                .object_begin => try iter.object_begin(visitor),
+                .object_field => try iter.object_field(visitor),
+                .object_continue => try iter.object_continue(visitor),
+                .scope_end => try iter.scope_end(visitor),
+                .array_begin => try iter.array_begin(visitor),
+                .array_value => try iter.array_value(visitor),
+                .array_continue => try iter.array_continue(visitor),
+                .document_end => return try iter.document_end(visitor),
+            };
+        }
+    }
+
+    inline fn object_begin(iter: *Iterator, visitor: *TapeBuilder) Error!State {
         iter.log_start_value("object");
         iter.depth += 1;
         // iter.log_line_fmt("", "depth", "{d}/{d}", .{ iter.depth, iter.parser.max_depth });
@@ -890,10 +944,10 @@ pub const Iterator = struct {
         }
         iter.increment_count();
         try visitor.visit_key(iter, key);
-        return iter.object_field(visitor);
+        return .object_field;
     }
 
-    inline fn object_field(iter: *Iterator, visitor: *TapeBuilder) Error!void {
+    inline fn object_field(iter: *Iterator, visitor: *TapeBuilder) Error!State {
         if (iter.advance()[0] != ':') {
             iter.log_error("Missing colon after key in object");
             return error.TAPE_ERROR;
@@ -905,18 +959,18 @@ pub const Iterator = struct {
                 _ = iter.advance();
                 iter.log_value("empty object");
                 try visitor.visit_empty_object(iter);
-            } else return iter.object_begin(visitor),
+            } else return .object_begin,
             '[' => if (iter.peek()[0] == ']') {
                 _ = iter.advance();
                 iter.log_value("empty array");
                 try visitor.visit_empty_array(iter);
-            } else return iter.array_begin(visitor),
+            } else return .array_begin,
             else => try visitor.visit_primitive(iter, value),
         }
-        return iter.object_continue(visitor);
+        return .object_continue;
     }
 
-    inline fn object_continue(iter: *Iterator, visitor: *TapeBuilder) Error!void {
+    inline fn object_continue(iter: *Iterator, visitor: *TapeBuilder) Error!State {
         const value = iter.advance();
         // std.log.debug("object_continue() value '{c}'", .{value});
         switch (value[0]) {
@@ -929,12 +983,12 @@ pub const Iterator = struct {
                     return error.TAPE_ERROR;
                 }
                 try visitor.visit_key(iter, key);
-                return iter.object_field(visitor);
+                return .object_field;
             },
             '}' => {
                 iter.log_end_value("object");
                 _ = try visitor.visit_object_end(iter);
-                return iter.scope_end(visitor);
+                return .scope_end;
             },
             else => {
                 iter.log_error("No comma between object fields");
@@ -944,18 +998,18 @@ pub const Iterator = struct {
         unreachable;
     }
 
-    inline fn scope_end(iter: *Iterator, visitor: *TapeBuilder) Error!void {
+    inline fn scope_end(iter: *Iterator, _: *TapeBuilder) Error!State {
         // std.log.debug("scope_end iter.depth {}", .{iter.depth});
         iter.depth -= 1;
-        if (iter.depth == 0) return iter.document_end(visitor);
+        if (iter.depth == 0) return .document_end;
         const is_array = iter.current_container().is_array;
         if (is_array)
-            return iter.array_continue(visitor);
+            return .array_continue;
 
-        return iter.object_continue(visitor);
+        return .object_continue;
     }
 
-    inline fn array_begin(iter: *Iterator, visitor: *TapeBuilder) Error!void {
+    inline fn array_begin(iter: *Iterator, visitor: *TapeBuilder) Error!State {
         iter.log_start_value("array");
         iter.depth += 1;
         if (iter.depth >= iter.parser.max_depth) {
@@ -964,10 +1018,10 @@ pub const Iterator = struct {
         }
         _ = try visitor.visit_array_start(iter);
         iter.increment_count();
-        return iter.array_value(visitor);
+        return .array_value;
     }
 
-    inline fn array_value(iter: *Iterator, visitor: *TapeBuilder) Error!void {
+    inline fn array_value(iter: *Iterator, visitor: *TapeBuilder) Error!State {
         const value = iter.advance();
         switch (value[0]) {
             '{' => {
@@ -975,30 +1029,30 @@ pub const Iterator = struct {
                     _ = iter.advance();
                     iter.log_value("empty object");
                     try visitor.visit_empty_object(iter);
-                } else return iter.object_begin(visitor);
+                } else return .object_begin;
             },
             '[' => {
                 if (iter.peek()[0] == ']') {
                     _ = iter.advance();
                     iter.log_value("empty array");
                     try visitor.visit_empty_array(iter);
-                } else return iter.array_begin(visitor);
+                } else return .array_begin;
             },
             else => try visitor.visit_primitive(iter, value),
         }
-        return iter.array_continue(visitor);
+        return .array_continue;
     }
 
-    inline fn array_continue(iter: *Iterator, visitor: *TapeBuilder) Error!void {
+    inline fn array_continue(iter: *Iterator, visitor: *TapeBuilder) Error!State {
         switch (iter.advance()[0]) {
             ',' => {
                 iter.increment_count();
-                return iter.array_value(visitor);
+                return .array_value;
             },
             ']' => {
                 iter.log_end_value("array");
                 try visitor.visit_array_end(iter);
-                return iter.scope_end(visitor);
+                return .scope_end;
             },
             else => {
                 iter.log_error("Missing comma between array values");
@@ -1041,34 +1095,6 @@ pub const Iterator = struct {
     inline fn increment_count(iter: *Iterator) void {
         // we have a key value pair in the object at parser.dom_parser.depth - 1
         iter.current_container().open_container.count += 1;
-    }
-
-    pub fn walk_document(iter: *Iterator, visitor: *TapeBuilder) !void {
-        iter.log_start();
-        if (iter.at_eof()) return error.EMPTY;
-        iter.log_start_value("document");
-        try visitor.visit_document_start(iter);
-        if (iter.parser.bytes.len == 0) return iter.document_end(visitor);
-
-        const value = iter.advance();
-        switch (value[0]) {
-            '{' => {
-                if (iter.peek()[0] == '}') {
-                    _ = iter.advance();
-                    iter.log_value("empty object");
-                    try visitor.visit_empty_object(iter);
-                } else return try iter.object_begin(visitor);
-            },
-            '[' => {
-                if (iter.peek()[0] == ']') {
-                    _ = iter.advance();
-                    iter.log_value("empty array");
-                    try visitor.visit_empty_array(iter);
-                } else return try iter.array_begin(visitor);
-            },
-            else => try visitor.visit_root_primitive(iter, value),
-        }
-        return iter.document_end(visitor);
     }
 };
 
@@ -1541,7 +1567,7 @@ pub fn main() !u8 {
     defer arena.deinit();
     const allocator = &arena.allocator;
     var parser: Parser = undefined;
-    debug = true;
+    // debug = true;
 
     if (os.argv.len == 1) {
         var stdin = std.io.getStdIn().reader();
@@ -1931,10 +1957,6 @@ test "float" {
 test "search tape" {
     try test_search_tape();
 }
-pub fn main2() !u8 {
-    try test_search_tape();
-    return 0;
-}
 
 fn test_search_tape() !void {
     var parser = try Parser.initFile(allr, "test/test.json", .{});
@@ -1945,19 +1967,35 @@ fn test_search_tape() !void {
     try testing.expectEqual(thumb.tape.scope_count(), 3);
     try testing.expect(thumb.is(.OBJECT));
     try testing.expectEqual(thumb.tape.idx, 15);
+
     const url = thumb.at_key("Url") orelse return testing.expect(false);
     try testing.expectEqual(url.tape.idx, 17);
     try testing.expectEqualStrings("http://ex.com/th.png", try url.get_string());
+
     const ht = thumb.at_key("Height") orelse return testing.expect(false);
     try testing.expectEqual(@as(i64, 125), try ht.get_int64());
+
     const priv = ele.at_key("Private") orelse return testing.expect(false);
     try testing.expectEqual(false, try priv.get_bool());
+
     const owner = ele.at_key("Owner") orelse return testing.expect(false);
     try testing.expectEqual(true, owner.is(.NULL));
+
     const array = ele.at_key("array") orelse return testing.expect(false);
     try testing.expectEqual(array.tape.idx, 26);
     try testing.expectEqual(true, array.is(.ARRAY));
+
     const array1 = array.at(0) orelse return testing.expect(false);
     try testing.expectEqual(true, array1.is(.INT64));
     try testing.expectEqual(@as(i64, 116), try array1.get_int64());
+}
+
+pub fn main2() !u8 {
+    // try test_search_tape();
+    var parser = try Parser.initFile(allr, "../../c/simdjson/jsonexamples/twitter.json", .{});
+    defer parser.deinit();
+    try parser.parse();
+    const count = try parser.element().at_key("search_metadata").?.at_key("count").?.get_int64();
+    try testing.expectEqual(@as(i64, 100), count);
+    return 0;
 }
