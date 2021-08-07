@@ -71,8 +71,6 @@ const Document = struct {
 };
 
 const BitIndexer = struct {
-    // tail: []u32,
-    // tail_pos: usize,
     tail: std.ArrayListUnmanaged(u32),
 
     // flatten out values in 'bits' assuming that they are are to have values of idx
@@ -1554,7 +1552,7 @@ const ElementType = enum(u8) {
 const Array = struct {
     tape: TapeRef,
     pub fn at(a: Array, idx: usize) ?Element {
-        var it = TapeRefIterator.init(.{ .doc = a.tape.doc, .idx = a.tape.idx + 1 }, a.tape.after_element() - 1);
+        var it = TapeRefIterator.init(a);
         const target_idx = idx + it.tape.idx + idx;
         while (true) {
             if (it.tape.idx == target_idx)
@@ -1605,7 +1603,7 @@ const Array = struct {
 const Object = struct {
     tape: TapeRef,
     pub fn at_key(o: Object, key: []const u8) ?Element {
-        var it = TapeRefIterator.init(.{ .doc = o.tape.doc, .idx = o.tape.idx + 1 }, o.tape.after_element() - 1);
+        var it = TapeRefIterator.init(o);
         while (true) {
             if (it.tape.key_equals(key))
                 return Element{ .tape = .{ .doc = it.tape.doc, .idx = it.tape.idx + 1 } };
@@ -1680,6 +1678,9 @@ const TapeRef = struct {
     pub inline fn value(tr: TapeRef) u64 {
         return TapeType.extract_value(tr.current_raw());
     }
+    pub inline fn next_value(tr: TapeRef) u64 {
+        return TapeType.extract_value(tr.doc.tape.items[tr.idx + 1]);
+    }
     pub inline fn after_element(tr: TapeRef) u64 {
         return switch (tr.tape_ref_type()) {
             .START_ARRAY, .START_OBJECT => tr.matching_brace_idx(),
@@ -1739,10 +1740,11 @@ const TapeRefIterator = struct {
     tape: TapeRef,
     end_idx: u64,
 
-    pub fn init(tape: TapeRef, end_idx: u64) TapeRefIterator {
+    pub fn init(iter: anytype) TapeRefIterator {
+        const tape = iter.tape;
         return .{
-            .tape = tape,
-            .end_idx = end_idx,
+            .tape = .{ .doc = tape.doc, .idx = tape.idx + 1 },
+            .end_idx = tape.after_element() - 1,
         };
     }
     pub fn next(tri: *TapeRefIterator) ?TapeRef {
@@ -1758,9 +1760,7 @@ const Element = struct {
         return switch (ele.tape.tape_ref_type()) {
             .START_OBJECT => (try ele.get_object()).at_pointer(json_pointer),
             .START_ARRAY => (try ele.get_array()).at_pointer(json_pointer),
-            else => blk: {
-                break :blk if (json_pointer.len != 0) error.INVALID_JSON_POINTER else ele;
-            },
+            else => if (json_pointer.len != 0) error.INVALID_JSON_POINTER else ele,
         };
     }
 
@@ -1771,6 +1771,7 @@ const Element = struct {
     pub fn at(ele: Element, idx: usize) ?Element {
         return if (ele.get_as_type(.ARRAY)) |a| a.ARRAY.at(idx) else |_| null;
     }
+
     pub fn get(ele: Element, out: anytype) Error!void {
         const T = @TypeOf(out);
         const info = @typeInfo(T);
@@ -1794,14 +1795,48 @@ const Element = struct {
                                 try ele.get(&x);
                                 break :blk x;
                             },
-                            else => @compileError("unsupported type: " ++ @typeName(T) ++ ". int, float, bool or optional type."),
+                            .Array => try ele.get(@as([]std.meta.Child(C), out)),
+                            .Struct => {
+                                switch (ele.tape.tape_ref_type()) {
+                                    .START_OBJECT => {
+                                        var obj = ele.get_object() catch unreachable;
+                                        inline for (std.meta.fields(C)) |field| {
+                                            if (obj.at_key(field.name)) |obj_ele|
+                                                try obj_ele.get(&@field(out, field.name));
+                                        }
+                                    },
+                                    else => return error.INCORRECT_TYPE,
+                                }
+                            },
+                            else => @compileError("unsupported type: " ++ @typeName(T) ++
+                                ". int, float, bool or optional type."),
                         }
                     },
                     .Slice => {
-                        const string = try ele.get_string();
-                        @memcpy(@ptrCast([*]u8, out.ptr), string.ptr, std.math.min(string.len, out.len * @sizeOf(C)));
+                        switch (ele.tape.tape_ref_type()) {
+                            .STRING => {
+                                const string = ele.get_string() catch unreachable;
+                                @memcpy(
+                                    @ptrCast([*]u8, out.ptr),
+                                    string.ptr,
+                                    std.math.min(string.len, out.len * @sizeOf(C)),
+                                );
+                            },
+                            .START_ARRAY => {
+                                var arr = ele.get_array() catch unreachable;
+                                var it = TapeRefIterator.init(arr);
+                                for (out) |*out_ele| {
+                                    const arr_ele = Element{ .tape = it.tape };
+                                    try arr_ele.get(out_ele);
+                                    _ = it.next() orelse break;
+                                }
+                            },
+                            else => return error.INCORRECT_TYPE,
+                        }
                     },
-                    else => @compileError("unsupported pointer type: " ++ @typeName(T) ++ ". expecting slice or single item pointer."),
+
+                    else => @compileError("unsupported pointer type: " ++ @typeName(T) ++
+                        ". expecting slice or single item pointer."),
                 }
             },
             else => @compileError("unsupported type: " ++ @typeName(T) ++ ". expecting pointer type."),
@@ -2095,19 +2130,19 @@ fn test_json_pointer() !void {
     try testing.expectEqual(@as(u64, 3), u);
     {
         var s = [1]u8{'x'} ** 8;
-        try (try parser.element().at_pointer("/a/e")).get(@as([]u8, &s));
+        try (try parser.element().at_pointer("/a/e")).get(&s);
         try testing.expectEqualStrings("e-string", &s);
     }
     const expected: [8]u8 = "e-stxxxx".*;
     {
         var s = [1]u8{'x'} ** 8;
-        try (try parser.element().at_pointer("/a/e")).get(@as([]u8, s[0..4]));
+        try (try parser.element().at_pointer("/a/e")).get(s[0..4]);
         try testing.expectEqualStrings(&expected, &s);
     }
     {
         // this convoluted test just shows you can read string data into slice types other than u8
         var s = [1]u16{mem.readIntLittle(u16, "xx")} ** 4;
-        try (try parser.element().at_pointer("/a/e")).get(@as([]u16, s[0..2]));
+        try (try parser.element().at_pointer("/a/e")).get(s[0..2]);
         const expected_u16s = @bitCast([4]u16, expected);
         try testing.expectEqualSlices(u16, &expected_u16s, &s);
     }
@@ -2116,6 +2151,32 @@ fn test_json_pointer() !void {
     try testing.expectEqual(@as(?u8, null), opt);
     try (try parser.element().at_pointer("/a/b/2")).get(&opt);
     try testing.expectEqual(@as(?u8, 3), opt);
+}
+
+test "get slice with array" {
+    const input =
+        \\[1,2,3,4]
+    ;
+    var s: [4]u8 = undefined;
+    var parser = try Parser.initFixedBuffer(allr, input, .{});
+    defer parser.deinit();
+    try parser.parse();
+    try parser.element().get(&s);
+    try testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4 }, &s);
+}
+
+test "get with struct" {
+    const S = struct { a: u8, b: u8 };
+    const input =
+        \\{"a": 42, "b": 84}
+    ;
+    var parser = try Parser.initFixedBuffer(allr, input, .{});
+    defer parser.deinit();
+    try parser.parse();
+    var s: S = undefined;
+    try parser.element().get(&s);
+    try testing.expectEqual(@as(u8, 42), s.a);
+    try testing.expectEqual(@as(u8, 84), s.b);
 }
 
 pub fn main2() !u8 {
