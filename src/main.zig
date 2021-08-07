@@ -1589,6 +1589,16 @@ const ElementType = enum(u8) {
 
 const Array = struct {
     tape: TapeRef,
+    pub fn at(a: Array, idx: usize) ?Element {
+        var it = TapeRefIterator.init(.{ .doc = a.tape.doc, .idx = a.tape.idx + 1 }, a.tape.after_element() - 1);
+        const target_idx = idx + it.tape.idx + idx;
+        while (true) {
+            if (it.tape.idx == target_idx)
+                return Element{ .tape = .{ .doc = it.tape.doc, .idx = it.tape.idx } };
+            _ = it.next() orelse break;
+        }
+        return null;
+    }
 };
 const Object = struct {
     tape: TapeRef,
@@ -1662,8 +1672,8 @@ const TapeRef = struct {
     }
 
     pub fn get_next_as_type(tr: TapeRef, comptime T: type) T {
-        // TODO don't make a copy
-        return (TapeRef{ .doc = tr.doc, .idx = tr.idx + 1 }).get_as_type(T);
+        comptime assert(@sizeOf(T) == @sizeOf(u64));
+        return @bitCast(T, tr.doc.tape.items[tr.idx + 1]);
     }
 
     pub fn get_string(tr: TapeRef) []const u8 {
@@ -1721,42 +1731,46 @@ const Element = struct {
     }
 
     pub fn at(ele: Element, idx: usize) ?Element {
-        return if (ele.get(.ARRAY)) |o| o.at(idx) else null;
+        return if (ele.get(.ARRAY)) |a| a.ARRAY.at(idx) else |_| null;
     }
     const E = error{INCORRECT_TYPE};
     pub fn get(ele: Element, ele_type: ElementType) E!Value {
         return switch (ele_type) {
-            .OBJECT => ele.get_object(),
-            .ARRAY => ele.get_array(),
-            .INT64 => ele.get_int64(),
-            .UINT64 => ele.get_uint64(),
-            .DOUBLE => ele.get_double(),
-            .STRING => ele.get_string(),
-            .BOOL => ele.get_bool(),
+            .OBJECT => Value{ .OBJECT = try ele.get_object() },
+            .ARRAY => Value{ .ARRAY = try ele.get_array() },
+            .INT64 => Value{ .INT64 = try ele.get_int64() },
+            .UINT64 => Value{ .UINT64 = try ele.get_uint64() },
+            .DOUBLE => Value{ .DOUBLE = try ele.get_double() },
+            .STRING => Value{ .STRING = try ele.get_string() },
+            .BOOL => Value{ .BOOL = try ele.get_bool() },
             .NULL => if (ele.tape.is(.NULL)) Value{ .NULL = {} } else error.INCORRECT_TYPE,
         };
     }
 
-    pub fn get_array(ele: Element) !Value {
-        return ele.get_tape_type(.START_ARRAY);
+    pub fn get_array(ele: Element) !Array {
+        return (try ele.get_tape_type(.START_ARRAY)).ARRAY;
     }
-    pub fn get_object(ele: Element) !Value {
-        return ele.get_tape_type(.START_OBJECT);
+    pub fn get_object(ele: Element) !Object {
+        return (try ele.get_tape_type(.START_OBJECT)).OBJECT;
     }
-    pub fn get_int64(ele: Element) !Value {
-        return ele.get_tape_type(.INT64);
+    pub fn get_int64(ele: Element) !i64 {
+        return (try ele.get_tape_type(.INT64)).INT64;
     }
-    pub fn get_uint64(ele: Element) !Value {
-        return ele.get_tape_type(.UINT64);
+    pub fn get_uint64(ele: Element) !u64 {
+        return (try ele.get_tape_type(.UINT64)).UINT64;
     }
-    pub fn get_double(ele: Element) !Value {
-        return ele.get_tape_type(.DOUBLE);
+    pub fn get_double(ele: Element) !f64 {
+        return (try ele.get_tape_type(.DOUBLE)).DOUBLE;
     }
-    pub fn get_string(ele: Element) !Value {
-        return ele.get_tape_type(.STRING);
+    pub fn get_string(ele: Element) ![]const u8 {
+        return (try ele.get_tape_type(.STRING)).STRING;
     }
-    pub fn get_bool(ele: Element) !Value {
-        return if (ele.get_tape_type(.TRUE)) |e| e else |_| ele.get_tape_type(.FALSE);
+    pub fn get_bool(ele: Element) !bool {
+        return switch (ele.tape.tape_ref_type()) {
+            .TRUE => true,
+            .FALSE => false,
+            else => error.INCORRECT_TYPE,
+        };
     }
 
     pub fn get_tape_type(ele: Element, comptime tape_type: TapeType) !Value {
@@ -1894,7 +1908,7 @@ test "float" {
         );
         const ele = parser.element();
         const d = try ele.get_double();
-        try testing.expectApproxEqAbs(@as(f64, 123.456), d.DOUBLE, 0.000000001);
+        try testing.expectApproxEqAbs(@as(f64, 123.456), d, 0.000000001);
     }
     {
         var parser = try Parser.initFixedBuffer(allr, "[-0.000000000000000000000000000000000000000000000000000000000000000000000000000001]", .{});
@@ -1927,22 +1941,23 @@ fn test_search_tape() !void {
     defer parser.deinit();
     try parser.parse();
     const ele = parser.element();
-    const thumb = ele.at_key("Thumbnail");
-    try testing.expect(thumb != null);
-    try testing.expectEqual(thumb.?.tape.scope_count(), 3);
-    try testing.expect(thumb.?.is(.OBJECT));
-    try testing.expectEqual(thumb.?.tape.idx, 15);
-    const url = thumb.?.at_key("Url");
-    try testing.expect(url != null);
-    try testing.expectEqual(url.?.tape.idx, 17);
-    try testing.expectEqualStrings("http://ex.com/th.png", (try url.?.get_string()).STRING);
-    const ht = thumb.?.at_key("Height");
-    try testing.expect(ht != null);
-    try testing.expectEqual(@as(i64, 125), (try ht.?.get_int64()).INT64);
-    const priv = ele.at_key("Private");
-    try testing.expect(priv != null);
-    try testing.expectEqual(false, (try priv.?.get_bool()).BOOL);
-    const owner = ele.at_key("Owner");
-    try testing.expect(owner != null);
-    try testing.expectEqual(true, owner.?.is(.NULL));
+    const thumb = ele.at_key("Thumbnail") orelse return testing.expect(false);
+    try testing.expectEqual(thumb.tape.scope_count(), 3);
+    try testing.expect(thumb.is(.OBJECT));
+    try testing.expectEqual(thumb.tape.idx, 15);
+    const url = thumb.at_key("Url") orelse return testing.expect(false);
+    try testing.expectEqual(url.tape.idx, 17);
+    try testing.expectEqualStrings("http://ex.com/th.png", try url.get_string());
+    const ht = thumb.at_key("Height") orelse return testing.expect(false);
+    try testing.expectEqual(@as(i64, 125), try ht.get_int64());
+    const priv = ele.at_key("Private") orelse return testing.expect(false);
+    try testing.expectEqual(false, try priv.get_bool());
+    const owner = ele.at_key("Owner") orelse return testing.expect(false);
+    try testing.expectEqual(true, owner.is(.NULL));
+    const array = ele.at_key("array") orelse return testing.expect(false);
+    try testing.expectEqual(array.tape.idx, 26);
+    try testing.expectEqual(true, array.is(.ARRAY));
+    const array1 = array.at(0) orelse return testing.expect(false);
+    try testing.expectEqual(true, array1.is(.INT64));
+    try testing.expectEqual(@as(i64, 116), try array1.get_int64());
 }
