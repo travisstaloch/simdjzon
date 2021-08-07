@@ -1156,8 +1156,7 @@ pub const TapeBuilder = struct {
         return tb.append2(iter, 0, val, .UINT64);
     }
 
-    pub inline fn write(tb: *TapeBuilder, iter: *Iterator, idx: usize, val: u64, tt: TapeType) void {
-        _ = iter;
+    pub inline fn write(tb: *TapeBuilder, idx: usize, val: u64, tt: TapeType) void {
         // iter.log_line_fmt("", "write", "val {} tt {} idx {}", .{ val, tt, idx });
         assert(idx < tb.tape.items.len);
         tb.tape.items[idx] = val | tt.as_u64();
@@ -1214,7 +1213,7 @@ pub const TapeBuilder = struct {
         //   tape_writer::write(iter.dom_parser.doc->tape[start_tape_index], next_tape_index(iter) | (uint64_t(cntsat) << 32), start);
 
         // iter.log_line_fmt("", "end_container", "next_tape_index {}", .{tb.next_tape_index()});
-        tb.write(iter, start_tape_index, tb.next_tape_index() | (@as(u64, cntsat) << 32), start);
+        tb.write(start_tape_index, tb.next_tape_index() | (@as(u64, cntsat) << 32), start);
     }
 
     inline fn on_start_string(tb: *TapeBuilder, iter: *Iterator) ![*]u8 {
@@ -1345,7 +1344,7 @@ pub const TapeBuilder = struct {
         return tb.start_container(&iter.parser.open_containers, iter.parser.allocator, false, 0);
     }
     pub inline fn visit_document_end(tb: *TapeBuilder, iter: *Iterator) !void {
-        tb.write(iter, 0, tb.next_tape_index(), .ROOT);
+        tb.write(0, tb.next_tape_index(), .ROOT);
         iter.log_line_fmt("?", "document_end", "open_containers.len {} tape.len {}", .{ iter.parser.open_containers.items.len, tb.tape.items.len });
         return tb.append(iter, 0, .ROOT);
     }
@@ -1587,18 +1586,19 @@ pub fn main() !u8 {
     return 0;
 }
 
+// TODO rename these
 const ElementType = enum(u8) {
-    ///< dom::array
+    ///< Array
     ARRAY = '[',
-    ///< dom::object
+    ///< Object
     OBJECT = '{',
-    ///< int64_t
+    ///< i64
     INT64 = 'l',
-    ///< uint64_t: any integer that fits in uint64_t but *not* int64_t
+    ///< u64: any integer that fits in u64 but *not* i64
     UINT64 = 'u',
     ///< double: Any number with a "." or "e" that fits in double.
     DOUBLE = 'd',
-    ///< std::string_view
+    ///< []const u8
     STRING = '"',
     ///< bool
     BOOL = 't',
@@ -1618,6 +1618,44 @@ const Array = struct {
         }
         return null;
     }
+
+    pub inline fn at_pointer(arr: Array, _json_pointer: []const u8) Error!Element {
+        if (_json_pointer.len == 0) return Element{ .tape = arr.tape } else if (_json_pointer[0] != '/') return error.INVALID_JSON_POINTER;
+        var json_pointer = _json_pointer[1..];
+        // - means "the append position" or "the element after the end of the array"
+        // We don't support this, because we're returning a real element, not a position.
+        if (json_pointer.len == 1 and json_pointer[0] == '-') {
+            return error.INDEX_OUT_OF_BOUNDS;
+        }
+
+        // Read the array index
+        var array_index: usize = 0;
+        var i: usize = 0;
+        while (i < json_pointer.len and json_pointer[i] != '/') : (i += 1) {
+            const digit = json_pointer[i] -% '0';
+            // Check for non-digit in array index. If it's there, we're trying to get a field in an object
+            if (digit > 9) return error.INCORRECT_TYPE;
+
+            array_index = array_index * 10 + digit;
+        }
+        // 0 followed by other digits is invalid
+        if (i > 1 and json_pointer[0] == '0') {
+            return error.INVALID_JSON_POINTER;
+        } // "JSON pointer array index has other characters after 0"
+
+        // Empty string is invalid; so is a "/" with no digits before it
+        if (i == 0) {
+            return error.INVALID_JSON_POINTER;
+        } // "Empty string in JSON pointer array index"
+
+        // Get the child
+        var child = arr.at(array_index) orelse return error.INVALID_JSON_POINTER;
+        // If there is a /, we're not done yet, call recursively.
+        if (i < json_pointer.len) {
+            child = try child.at_pointer(json_pointer[i..]);
+        }
+        return child;
+    }
 };
 const Object = struct {
     tape: TapeRef,
@@ -1629,6 +1667,49 @@ const Object = struct {
             _ = it.next() orelse break;
         }
         return null;
+    }
+
+    pub fn at_pointer(o: Object, _json_pointer: []const u8) Error!Element {
+        if (_json_pointer.len == 0) { // an empty string means that we return the current node
+            return Element{ .tape = o.tape }; // copy the current node
+        } else if (_json_pointer[0] != '/') { // otherwise there is an error
+            return error.INVALID_JSON_POINTER;
+        }
+        var json_pointer = _json_pointer[1..];
+        const slash = mem.indexOfScalar(u8, json_pointer, '/');
+        const key = json_pointer[0 .. slash orelse json_pointer.len];
+        // Grab the child with the given key
+        var child: Element = undefined;
+
+        // TODO escapes
+        // // If there is an escape character in the key, unescape it and then get the child.
+        // var escape = mem.indexOfScalar(u8, key, '~');
+
+        // if (escape != null) {
+        //     // Unescape the key
+        //     var unescaped: [0x100]u8 = undefined;
+        //     mem.copy(u8, &unescaped, key);
+        //     while (true) {
+        //         switch (unescaped[escape.? + 1]) {
+        //             '0' => unescaped.replace(escape, 2, "~"),
+        //             '1' => unescaped.replace(escape, 2, "/"),
+        //             else => return error.INVALID_JSON_POINTER, // "Unexpected ~ escape character in JSON pointer");
+        //         }
+        //         //   escape = unescaped.find('~', escape+1);
+        //         escape = mem.indexOfScalar(u8, unescaped[escape.? + 1], '~');
+        //         if (escape != null) break;
+        //     }
+        //     child = o.at_key(unescaped) catch return child;
+        // } else {
+        //     child = o.at_key(key) catch return child; // we do not continue if there was an error
+        // }
+        child = o.at_key(key) orelse return child;
+
+        // If there is a /, we have to recurse and look up more of the path
+        if (slash != null) {
+            child = try child.at_pointer(json_pointer[slash.?..]);
+        }
+        return child;
     }
 };
 const Value = union(ElementType) {
@@ -1663,13 +1744,11 @@ const TapeRef = struct {
     }
     pub inline fn matching_brace_idx(tr: TapeRef) u32 {
         const result = @truncate(u32, tr.current_raw());
-        std.log.debug("TapeRef matching_brace_idx() for {} {}", .{ tr.tape_ref_type(), result });
+        // std.log.debug("TapeRef matching_brace_idx() for {} {}", .{ tr.tape_ref_type(), result });
         return result;
-        // return tr.value() + tr.scope_count();
-
     }
     pub inline fn current_raw(tr: TapeRef) u64 {
-        std.log.debug("TapeRef current() idx {} len {}", .{ tr.idx, tr.doc.tape.items.len });
+        // std.log.debug("TapeRef current() idx {} len {}", .{ tr.idx, tr.doc.tape.items.len });
         return tr.doc.tape.items[tr.idx];
     }
     pub inline fn scope_count(tr: TapeRef) u32 {
@@ -1730,18 +1809,13 @@ const TapeRefIterator = struct {
 const Element = struct {
     tape: TapeRef,
 
-    pub inline fn at_pointer(ele: Element, json_pointer: []const u8) ?Element {
+    pub inline fn at_pointer(ele: Element, json_pointer: []const u8) Error!Element {
         return switch (ele.tape.tape_ref_type()) {
-            .START_OBJECT => ele.object(tape).at_pointer(json_pointer),
-            .START_ARRAY => ele.array(tape).at_pointer(json_pointer),
-            else => if (!json_pointer.len == 0) // a non-empty string is invalid on an atom
-                INVALID_JSON_POINTER
-            else
-                ele,
-            // an empty string means that we return the current node
-            //   dom::element copy(*this);
-            //   return simdjson_result<element>(std::move(copy));
-
+            .START_OBJECT => (try ele.get_object()).at_pointer(json_pointer),
+            .START_ARRAY => (try ele.get_array()).at_pointer(json_pointer),
+            else => blk: {
+                break :blk if (json_pointer.len != 0) error.INVALID_JSON_POINTER else ele;
+            },
         };
     }
 
@@ -1752,8 +1826,7 @@ const Element = struct {
     pub fn at(ele: Element, idx: usize) ?Element {
         return if (ele.get(.ARRAY)) |a| a.ARRAY.at(idx) else |_| null;
     }
-    const E = error{INCORRECT_TYPE};
-    pub fn get(ele: Element, ele_type: ElementType) E!Value {
+    pub fn get(ele: Element, ele_type: ElementType) Error!Value {
         return switch (ele_type) {
             .OBJECT => Value{ .OBJECT = try ele.get_object() },
             .ARRAY => Value{ .ARRAY = try ele.get_array() },
@@ -1981,6 +2054,17 @@ fn test_search_tape() !void {
     const array1 = array.at(0) orelse return testing.expect(false);
     try testing.expectEqual(true, array1.is(.INT64));
     try testing.expectEqual(@as(i64, 116), try array1.get_int64());
+}
+
+test "json pointer" {
+    const input =
+        \\{"a": {"b": [1,2,3]}}
+    ;
+    var parser = try Parser.initFixedBuffer(allr, input, .{});
+    defer parser.deinit();
+    try parser.parse();
+    const b0 = try parser.element().at_pointer("/a/b/0");
+    try testing.expectEqual(@as(i64, 1), try b0.get_int64());
 }
 
 pub fn main2() !u8 {
