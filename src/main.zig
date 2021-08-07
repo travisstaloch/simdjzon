@@ -80,7 +80,7 @@ const BitIndexer = struct {
     // base_ptr[base] incrementing base as we go
     // will potentially store extra values beyond end of valid bits, so base_ptr
     // needs to be large enough to handle this
-    inline fn write(indexer: *BitIndexer, reader_pos_: u64, bits_: u64, allocator: *mem.Allocator) !void {
+    inline fn write(indexer: *BitIndexer, reader_pos_: u64, bits_: u64) void {
         var bits = bits_;
         // In some instances, the next branch is expensive because it is mispredicted.
         // Unfortunately, in other cases,
@@ -98,7 +98,7 @@ const BitIndexer = struct {
         // Do the first 8 all together
         // for (int i=0; i<8; i++) {
         {
-            var new_items = try indexer.tail.addManyAsArray(allocator, 8);
+            var new_items = indexer.tail.addManyAsArrayAssumeCapacity(8);
             for (new_items) |*ptr| {
                 //   this->tail[i] = idx + trailing_zeroes(bits);
                 //   bits = clear_lowest_bit(bits);
@@ -116,7 +116,7 @@ const BitIndexer = struct {
             //     this->tail[i] = idx + trailing_zeroes(bits);
             //     bits = clear_lowest_bit(bits);
             //   }
-            var new_items = try indexer.tail.addManyAsArray(allocator, 8);
+            var new_items = indexer.tail.addManyAsArrayAssumeCapacity(8);
             for (new_items) |*ptr| {
                 //   this->tail[i] = idx + trailing_zeroes(bits);
                 //   bits = clear_lowest_bit(bits);
@@ -142,7 +142,7 @@ const BitIndexer = struct {
                 // indexer.tail[indexer.tail_pos + 16 ..][i] = @intCast(u32, idx + @ctz(u64, bits));
                 // var new_item = try indexer.tail.addOne(allocator);
                 // new_item.* = @intCast(u32, idx + @ctz(u64, bits));
-                try indexer.tail.append(allocator, @intCast(u32, reader_pos + @ctz(u64, bits)));
+                indexer.tail.appendAssumeCapacity(@intCast(u32, reader_pos + @ctz(u64, bits)));
                 bits = (bits -% 1) & bits;
                 i += 1;
                 if (i >= cnt) break;
@@ -549,11 +549,9 @@ const StructuralIndexer = struct {
     bit_indexer: BitIndexer,
     checker: Utf8Checker,
 
-    pub fn init(allocator: *mem.Allocator, tail_len: usize) !StructuralIndexer {
-        var tail = std.ArrayListUnmanaged(u32){};
-        try tail.ensureTotalCapacity(allocator, tail_len);
+    pub fn init() !StructuralIndexer {
         return StructuralIndexer{
-            .bit_indexer = .{ .tail = tail },
+            .bit_indexer = .{ .tail = std.ArrayListUnmanaged(u32){} },
             .checker = .{},
         };
     }
@@ -595,7 +593,7 @@ const StructuralIndexer = struct {
         if (STEP_SIZE == 64) {
             const block_1 = nextBlock(parser, read_buf);
             // println("{b:0>64} | characters.op", .{@bitReverse(u64, block_1.characters.op)});
-            try si.next(read_buf, block_1, reader_pos, parser.allocator);
+            try si.next(read_buf, block_1, reader_pos);
             // TODO: better allocation strategy
             // std.log.debug("stream pos {}", .{try stream.getPos()});
         } else {
@@ -612,7 +610,7 @@ const StructuralIndexer = struct {
     fn finish(si: *StructuralIndexer, parser: *Parser, idx: usize, len: usize, partial: bool) !void {
         _ = partial;
         // println("finish idx {}, len {}", .{ idx, len });
-        try si.bit_indexer.write(idx, si.prev_structurals, parser.allocator);
+        si.bit_indexer.write(idx, si.prev_structurals);
 
         // TODO:
         //   error_code error = scanner.finish();
@@ -645,7 +643,7 @@ const StructuralIndexer = struct {
         // * starts with [, it should end with ]. If we enforce that rule, then we would get
         // * ][[ which is invalid.
         // **/
-        var new_inds = try parser.indexer.bit_indexer.tail.addManyAsArray(parser.allocator, 3);
+        var new_inds = parser.indexer.bit_indexer.tail.addManyAsArrayAssumeCapacity(3);
         new_inds[0] = @intCast(u32, len);
         new_inds[1] = @intCast(u32, len);
         new_inds[2] = 0;
@@ -690,7 +688,7 @@ const StructuralIndexer = struct {
         return aint | bint;
     }
 
-    fn next(si: *StructuralIndexer, input_vec: u8x64, block: Block, reader_pos: u64, allocator: *mem.Allocator) !void {
+    fn next(si: *StructuralIndexer, input_vec: u8x64, block: Block, reader_pos: u64) !void {
         const chunks = @bitCast([2]u8x32, input_vec);
         const unescaped = lteq(u8, chunks, 0x1F);
         if (debug) {
@@ -709,7 +707,7 @@ const StructuralIndexer = struct {
         // println("{b:0>64} | block.string.quote", .{@bitReverse(u64, block.string.quote)});
         // println("{b:0>64} | unscaped", .{ @bitReverse(u64, unescaped) });
         si.checker.check_next_input(input_vec);
-        try si.bit_indexer.write(reader_pos, si.prev_structurals, allocator); // Output *last* iteration's structurals to the parser
+        si.bit_indexer.write(reader_pos, si.prev_structurals); // Output *last* iteration's structurals to the parser
         si.prev_structurals = block.structural_start();
         si.unescaped_chars_error |= block.non_quote_inside_string(unescaped);
     }
@@ -1192,10 +1190,8 @@ pub const TapeBuilder = struct {
         is_array: bool,
         count: u32,
     ) !void {
-        // try open_containers.ensureUnusedCapacity(allocator, 1);
-        // const cidx = open_containers.addOneAssumeCapacity();
         const tape_idx = tb.next_tape_index();
-        try open_containers.append(allocator, .{
+        open_containers.appendAssumeCapacity(.{
             .is_array = is_array,
             .open_container = .{
                 .tape_index = @intCast(u32, tape_idx),
@@ -1207,7 +1203,6 @@ pub const TapeBuilder = struct {
 
     pub inline fn end_container(tb: *TapeBuilder, iter: *Iterator, start: TapeType, end: TapeType) Error!void {
         // Write the ending tape element, pointing at the start location
-        // const container = iter.parser.open_containers.get(iter.depth).open_container;
         const container = iter.parser.open_containers.items[iter.depth].open_container;
         defer iter.parser.open_containers.shrinkRetainingCapacity(iter.depth);
         const start_tape_index = container.tape_index;
@@ -1218,9 +1213,8 @@ pub const TapeBuilder = struct {
         const cntsat: u32 = std.math.min(@intCast(u32, container.count), 0xFFFFFF);
         //   tape_writer::write(iter.dom_parser.doc->tape[start_tape_index], next_tape_index(iter) | (uint64_t(cntsat) << 32), start);
 
-        iter.log_line_fmt("", "end_container", "next_tape_index {}", .{tb.next_tape_index()});
+        // iter.log_line_fmt("", "end_container", "next_tape_index {}", .{tb.next_tape_index()});
         tb.write(iter, start_tape_index, tb.next_tape_index() | (@as(u64, cntsat) << 32), start);
-        // tb.write(iter, start_tape_index, tb.next_tape_index() | cntsat, start);
     }
 
     inline fn on_start_string(tb: *TapeBuilder, iter: *Iterator) ![*]u8 {
@@ -1351,8 +1345,6 @@ pub const TapeBuilder = struct {
         return tb.start_container(&iter.parser.open_containers, iter.parser.allocator, false, 0);
     }
     pub inline fn visit_document_end(tb: *TapeBuilder, iter: *Iterator) !void {
-        // try tb.tape.append(0, .ROOT);
-        // tape_writer::write(iter.dom_parser.doc->tape[start_tape_index], next_tape_index(iter), internal::tape_type::ROOT);
         tb.write(iter, 0, tb.next_tape_index(), .ROOT);
         iter.log_line_fmt("?", "document_end", "open_containers.len {} tape.len {}", .{ iter.parser.open_containers.items.len, tb.tape.items.len });
         return tb.append(iter, 0, .ROOT);
@@ -1388,12 +1380,16 @@ pub const Parser = struct {
             .filename = filename,
             .allocator = allocator,
             .doc = Document.init(),
-            .indexer = try StructuralIndexer.init(allocator, std.mem.page_size),
+            .indexer = try StructuralIndexer.init(),
             .open_containers = std.ArrayListUnmanaged(OpenContainerInfo){},
             .max_depth = options.max_depth,
         };
         parser.input_len = try parser.read_file(filename);
-        try parser.doc.allocate(allocator, parser.input_len);
+        const capacity = parser.input_len;
+        try parser.doc.allocate(allocator, capacity);
+        const max_structures = SIMDJSON_ROUNDUP_N(capacity, 64) + 2 + 7;
+        try parser.indexer.bit_indexer.tail.ensureTotalCapacity(allocator, max_structures);
+        try parser.open_containers.ensureTotalCapacity(allocator, DEFAULT_MAX_DEPTH);
         return parser;
     }
 
@@ -1404,21 +1400,25 @@ pub const Parser = struct {
             .filename = "<fixed buffer>",
             .allocator = allocator,
             .doc = Document.init(),
-            .indexer = try StructuralIndexer.init(allocator, std.mem.page_size),
+            .indexer = try StructuralIndexer.init(),
             .bytes = &[_]u8{},
             .open_containers = std.ArrayListUnmanaged(OpenContainerInfo){}, // std.MultiArrayList(OpenContainerInfo){},
             .max_depth = options.max_depth,
         };
         parser.input_len = try std.math.cast(u32, input.len);
-        const paddedlen = try std.math.add(u32, parser.input_len, SIMDJSON_PADDING);
+        const capacity = parser.input_len;
+        const max_structures = SIMDJSON_ROUNDUP_N(capacity, 64) + 2 + 7;
+        const paddedlen = try std.math.add(u32, capacity, SIMDJSON_PADDING);
         parser.bytes = try parser.allocator.alloc(u8, paddedlen);
         mem.copy(u8, parser.bytes, input);
 
-        // We write zeroes in the padded region to avoid having uninitized
+        // We write spaces in the padded region to avoid having uninitized
         // garbage. If nothing else, garbage getting read might trigger a
         // warning in a memory checking.
-        std.mem.set(u8, parser.bytes[parser.input_len..], ascii_space);
-        try parser.doc.allocate(allocator, parser.input_len);
+        std.mem.set(u8, parser.bytes[capacity..], ascii_space);
+        try parser.doc.allocate(allocator, capacity);
+        try parser.indexer.bit_indexer.tail.ensureTotalCapacity(allocator, max_structures);
+        try parser.open_containers.ensureTotalCapacity(allocator, DEFAULT_MAX_DEPTH);
         return parser;
     }
 
@@ -1431,7 +1431,7 @@ pub const Parser = struct {
             parser.bytes = try parser.allocator.realloc(parser.bytes, paddedlen);
             const nbytes = try f.read(parser.bytes);
             if (nbytes < len) return error.IO_ERROR;
-            // We write zeroes in the padded region to avoid having uninitized
+            // We write spaces in the padded region to avoid having uninitized
             // garbage. If nothing else, garbage getting read might trigger a
             // warning in a memory checking.
             std.mem.set(u8, parser.bytes[len..], ascii_space);
@@ -1533,13 +1533,6 @@ pub const Parser = struct {
         // std.log.debug("read_buf {d}", .{read_buf});
         try parser.indexer.step(read_buf, parser, pos);
         try parser.indexer.finish(parser, pos + 64, end_pos, STREAMING);
-
-        // if (parser.indexer.bit_indexer.tail.items.len >= 4) {
-        //     // TODO: verify all input was processed
-        //     println("final pos {} end_pos {} parser.input_len {} tail.last {}", .{ pos, end_pos, parser.input_len, parser.indexer.bit_indexer.tail.items[parser.indexer.bit_indexer.tail.items.len - 4] });
-        //     println("tail.items {d}", .{parser.indexer.bit_indexer.tail.items});
-        //     if (parser.input_len != parser.indexer.bit_indexer.tail.items[parser.indexer.bit_indexer.tail.items.len - 4]) return error.TAPE_ERROR;
-        // }
     }
 
     fn stage2(parser: *Parser) !void {
