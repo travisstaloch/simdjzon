@@ -801,45 +801,46 @@ pub const Iterator = struct {
     }
 
     fn log_line(iter: *Iterator, title_prefix: []const u8, title: []const u8, detail: []const u8) void {
+        var log_buf: [0x100]u8 = undefined;
+        var log_buf2: [LOG_BUFFER_LEN]u8 = undefined;
         if (!debug) return;
-        var buf: [0x1000]u8 = undefined;
-        var fba = std.heap.FixedBufferAllocator.init(&buf);
 
-        const depth_padding = pad_with_alloc("", ' ', @intCast(u8, if (iter.log_depth < 0x0f) iter.log_depth * 2 else 0xff), &fba.allocator);
-        const titles = std.fmt.allocPrint(&fba.allocator, "{s}{s}{s}", .{ depth_padding, title_prefix, title }) catch unreachable;
-        const p1 = pad_with_alloc(titles, ' ', LOG_EVENT_LEN, &fba.allocator);
+        var log_fba = std.heap.FixedBufferAllocator.init(&log_buf);
+        const depth_padding = pad_with_alloc("", ' ', @intCast(u8, if (iter.log_depth < 0x0f) iter.log_depth * 2 else 0xff), &log_fba.allocator);
+        const titles = std.fmt.allocPrint(&log_fba.allocator, "{s}{s}{s}", .{ depth_padding, title_prefix, title }) catch unreachable;
+        const p1 = pad_with_alloc(titles, ' ', LOG_EVENT_LEN, &log_fba.allocator);
         print("| {s} ", .{p1});
         const current_index = if (iter.at_beginning()) null else iter.next_structural - 1;
         const next_index = iter.next_structural;
-        var buf2: [LOG_BUFFER_LEN]u8 = undefined;
+
         const content = blk: {
             if (current_index) |ci| {
-                for (buf2) |*c, i| {
+                for (log_buf2) |*c, i| {
                     c.* = printable_char(iter.parser.bytes[ci[0] + i]);
                 }
-                break :blk pad_with_alloc(&buf2, ' ', LOG_BUFFER_LEN, &fba.allocator);
+                break :blk pad_with_alloc(&log_buf2, ' ', LOG_BUFFER_LEN, &log_fba.allocator);
             } else {
                 break :blk &pad_with("", ' ', LOG_BUFFER_LEN);
             }
         };
         print("| {s} ", .{content});
         const next_content = blk: {
-            for (buf2) |*c, i| {
+            for (log_buf2) |*c, i| {
                 if (next_index[0] + i >= iter.parser.bytes.len) break;
                 // std.log.debug("bytes.len {} next_index[0] {} i {}", .{ iter.parser.bytes.len, next_index[0], i });
                 c.* = printable_char(iter.parser.bytes[next_index[0] + i]);
             }
-            break :blk pad_with_alloc(&buf2, ' ', LOG_SMALL_BUFFER_LEN, &fba.allocator);
+            break :blk pad_with_alloc(&log_buf2, ' ', LOG_SMALL_BUFFER_LEN, &log_fba.allocator);
         };
         print("| {s} ", .{next_content});
 
         if (current_index) |ci| {
             print("| {s} ", .{
                 pad_with_alloc(
-                    std.fmt.bufPrint(&buf2, "{}", .{ci[0]}) catch unreachable,
+                    std.fmt.bufPrint(&log_buf2, "{}", .{ci[0]}) catch unreachable,
                     ' ',
                     LOG_INDEX_LEN,
-                    &fba.allocator,
+                    &log_fba.allocator,
                 ),
             });
         } else {
@@ -871,9 +872,10 @@ pub const Iterator = struct {
         if (debug) std.log.err(fmt, args);
     }
 
-    pub fn object_begin(iter: *Iterator, visitor: *TapeBuilder) !void {
+    inline fn object_begin(iter: *Iterator, visitor: *TapeBuilder) !void {
         iter.log_start_value("object");
         iter.depth += 1;
+        // iter.log_line_fmt("", "depth", "{d}/{d}", .{ iter.depth, iter.parser.max_depth });
 
         if (iter.depth >= iter.parser.max_depth) {
             iter.log_error("Exceeded max depth!");
@@ -1080,23 +1082,25 @@ pub const TapeType = enum(u8) {
     INT64 = 'l',
     UINT64 = 'u',
     DOUBLE = 'd',
-    TRUE_VALUE = 't',
-    FALSE_VALUE = 'f',
-    NULL_VALUE = 'n',
+    TRUE = 't',
+    FALSE = 'f',
+    NULL = 'n',
     INVALID = 'i',
-    pub fn as_u64(tt: TapeType) u64 {
+    pub inline fn as_u64(tt: TapeType) u64 {
         return @as(u64, @enumToInt(tt)) << 56;
     }
-    pub fn from_u64(x: u64) TapeType {
+    pub inline fn from_u64(x: u64) TapeType {
         return std.meta.intToEnum(TapeType, (x & 0xff00000000000000) >> 56) catch .INVALID;
     }
-    pub fn encode_value(tt: TapeType, value: u64) u64 {
+    pub inline fn encode_value(tt: TapeType, value: u64) u64 {
         assert(value <= std.math.maxInt(u56));
         return @as(u64, @enumToInt(tt)) << 56 | value;
     }
-    pub fn extract_value(item: u64) u64 {
-        return item & 0x00ffffffffffffff;
+    pub inline fn extract_value(item: u64) u64 {
+        return item & value_mask;
     }
+    pub const value_mask = 0x00ffffffffffffff;
+    pub const count_mask = 0xffffff;
 };
 
 pub const TapeBuilder = struct {
@@ -1251,19 +1255,19 @@ pub const TapeBuilder = struct {
         iter.log_value("true");
         assert(value[0] == 't');
         if (!try AtomParsing.is_valid_true_atom(value + 1)) return error.T_ATOM_ERROR;
-        try tb.append(iter, 0, TapeType.TRUE_VALUE);
+        try tb.append(iter, 0, TapeType.TRUE);
     }
     inline fn visit_false_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log_value("false");
         assert(value[0] == 'f');
         if (!try AtomParsing.is_valid_false_atom(value + 1)) return error.T_ATOM_ERROR;
-        try tb.append(iter, 0, TapeType.FALSE_VALUE);
+        try tb.append(iter, 0, TapeType.FALSE);
     }
     inline fn visit_null_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log_value("null");
         assert(value[0] == 'n');
         if (!try AtomParsing.is_valid_null_atom(value + 1)) return error.T_ATOM_ERROR;
-        try tb.append(iter, 0, TapeType.NULL_VALUE);
+        try tb.append(iter, 0, TapeType.NULL);
     }
 
     inline fn visit_primitive(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) !void {
@@ -1573,7 +1577,7 @@ test "tape build" {
         TapeType.STRING.encode_value(3), // "Url" :10
         TapeType.STRING.encode_value(21), // "http://ex.com/img.png" :11
         TapeType.STRING.encode_value(7), // "Private" :12
-        TapeType.FALSE_VALUE.as_u64(), // :13
+        TapeType.FALSE.as_u64(), // :13
         TapeType.STRING.encode_value(9), // "Thumbnail" :14
         TapeType.START_OBJECT.encode_value(25 | (3 << 32)), // 25, length 3 :15
         TapeType.STRING.encode_value(3), // "Url" :16
@@ -1590,7 +1594,7 @@ test "tape build" {
         TapeType.INT64.as_u64(), 234, // :31
         TapeType.END_ARRAY.encode_value(26), //  pointing  to  26 :33
         TapeType.STRING.encode_value(5), // "Owner" :34
-        TapeType.NULL_VALUE.as_u64(), // :35
+        TapeType.NULL.as_u64(), // :35
         TapeType.END_OBJECT.encode_value(1), //  pointing  to  1 :36
         TapeType.ROOT.encode_value(0), //  pointing  to 0 :37
     };
