@@ -96,12 +96,9 @@ const BitIndexer = struct {
         const start_count = indexer.tail.items.len;
 
         // Do the first 8 all together
-        // for (int i=0; i<8; i++) {
         {
             var new_items = indexer.tail.addManyAsArrayAssumeCapacity(8);
             for (new_items) |*ptr| {
-                //   this->tail[i] = idx + trailing_zeroes(bits);
-                //   bits = clear_lowest_bit(bits);
                 ptr.* = @intCast(u32, reader_pos + @ctz(u64, bits));
                 bits = (bits -% 1) & bits;
                 // std.log.debug("bits {}", .{bits});
@@ -110,16 +107,9 @@ const BitIndexer = struct {
 
         // Do the next 8 all together (we hope in most cases it won't happen at all
         // and the branch is easily predicted).
-        // if (simdjson_unlikely(cnt > 8)) {
         if (cnt > 8) {
-            //   for (int i=8; i<16; i++) {
-            //     this->tail[i] = idx + trailing_zeroes(bits);
-            //     bits = clear_lowest_bit(bits);
-            //   }
             var new_items = indexer.tail.addManyAsArrayAssumeCapacity(8);
             for (new_items) |*ptr| {
-                //   this->tail[i] = idx + trailing_zeroes(bits);
-                //   bits = clear_lowest_bit(bits);
                 ptr.* = @intCast(u32, reader_pos + @ctz(u64, bits));
                 bits = (bits -% 1) & bits;
             }
@@ -128,20 +118,9 @@ const BitIndexer = struct {
         // Most files don't have 16+ structurals per block, so we take several basically guaranteed
         // branch mispredictions here. 16+ structurals per block means either punctuation ({} [] , // :)
         // or the start of a value ("abc" true 123) every four characters.
-        //   if (simdjson_unlikely(cnt > 16)) {
-        //     int i = 16;
-        //     do {
-        //       this->tail[i] = idx + trailing_zeroes(bits);
-        //       bits = clear_lowest_bit(bits);
-        //       i++;
-        //     } while (i < cnt);
-        //   }
         if (cnt > 16) {
             var i: usize = 16;
             while (true) {
-                // indexer.tail[indexer.tail_pos + 16 ..][i] = @intCast(u32, idx + @ctz(u64, bits));
-                // var new_item = try indexer.tail.addOne(allocator);
-                // new_item.* = @intCast(u32, idx + @ctz(u64, bits));
                 indexer.tail.appendAssumeCapacity(@intCast(u32, reader_pos + @ctz(u64, bits)));
                 bits = (bits -% 1) & bits;
                 i += 1;
@@ -150,7 +129,6 @@ const BitIndexer = struct {
         }
 
         // std.log.debug("tail.items.len {d} start_count + cnt {d}", .{ indexer.tail.items.len, start_count + cnt });
-        // indexer.tail_pos += cnt;
         indexer.tail.shrinkRetainingCapacity(start_count + cnt);
     }
 };
@@ -158,57 +136,57 @@ const BitIndexer = struct {
 pub const FileError = std.fs.File.OpenError || std.fs.File.ReadError || std.fs.File.SeekError;
 pub const Error = std.mem.Allocator.Error || std.os.WriteError || FileError || error{ EndOfStream, Overflow } || JsonError;
 const JsonError = error{
-    ///< This parser can't support a document that big
+    /// This parser can't support a document that big
     CAPACITY,
-    ///< Error allocating memory, most likely out of memory
+    /// Error allocating memory, most likely out of memory
     MEMALLOC,
-    ///< Something went wrong while writing to the tape (stage 2), this is a generic error
+    /// Something went wrong while writing to the tape (stage 2), this is a generic error
     TAPE_ERROR,
-    ///< Your document exceeds the user-specified depth limitation
+    /// Your document exceeds the user-specified depth limitation
     DEPTH_ERROR,
-    ///< Problem while parsing a string
+    /// Problem while parsing a string
     STRING_ERROR,
-    ///< Problem while parsing an atom starting with the letter 't'
+    /// Problem while parsing an atom starting with the letter 't'
     T_ATOM_ERROR,
-    ///< Problem while parsing an atom starting with the letter 'f'
+    /// Problem while parsing an atom starting with the letter 'f'
     F_ATOM_ERROR,
-    ///< Problem while parsing an atom starting with the letter 'n'
+    /// Problem while parsing an atom starting with the letter 'n'
     N_ATOM_ERROR,
-    ///< Problem while parsing a number
+    /// Problem while parsing a number
     NUMBER_ERROR,
-    ///< the input is not valid UTF-8
+    /// the input is not valid UTF-8
     UTF8_ERROR,
-    ///< unknown error, or uninitialized document
+    /// unknown error, or uninitialized document
     UNINITIALIZED,
-    ///< no structural element found
+    /// no structural element found
     EMPTY,
-    ///< found unescaped characters in a string.
+    /// found unescaped characters in a string.
     UNESCAPED_CHARS,
-    ///< missing quote at the end
+    /// missing quote at the end
     UNCLOSED_STRING,
-    ///< unsupported architecture
+    /// unsupported architecture
     UNSUPPORTED_ARCHITECTURE,
-    ///< JSON element has a different type than user expected
+    /// JSON element has a different type than user expected
     INCORRECT_TYPE,
-    ///< JSON number does not fit in 64 bits
+    /// JSON number does not fit in 64 bits
     NUMBER_OUT_OF_RANGE,
-    ///< JSON array index too large
+    /// JSON array index too large
     INDEX_OUT_OF_BOUNDS,
-    ///< JSON field not found in object
+    /// JSON field not found in object
     NO_SUCH_FIELD,
-    ///< Error reading a file
+    /// Error reading a file
     IO_ERROR,
-    ///< Invalid JSON pointer reference
+    /// Invalid JSON pointer reference
     INVALID_JSON_POINTER,
-    ///< Invalid URI fragment
+    /// Invalid URI fragment
     INVALID_URI_FRAGMENT,
-    ///< indicative of a bug in simdjson
+    /// indicative of a bug in simdjson
     UNEXPECTED_ERROR,
-    ///< parser is already in use.
+    /// parser is already in use.
     PARSER_IN_USE,
-    ///< tried to iterate an array or object out of order
+    /// tried to iterate an array or object out of order
     OUT_OF_ORDER_ITERATION,
-    ///< The JSON doesn't have enough padding for simdjson to safely parse it.
+    /// The JSON doesn't have enough padding for simdjson to safely parse it.
     INSUFFICIENT_PADDING,
 };
 
@@ -225,7 +203,8 @@ const Utf8Checker = struct {
             else => unreachable,
         };
     }
-
+    // zig fmt: off
+    // TODO reformat
     inline fn check_special_cases(input: u8x32, prev1: u8x32) u8x32 {
         // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
         // Bit 1 = Too Long (ASCII followed by continuation)
@@ -254,7 +233,6 @@ const Utf8Checker = struct {
         // 11111___ 1000____
         const OVERLONG_4: u8 = 1 << 6; // 11110000 1000____
 
-        // const byte_1_high = prev1.shr<4>().lookup_16<uint8_t>(
         const byte_1_high_0 = prev1 >> @splat(32, @as(u3, 4));
         const tbl1 = [16]u8{
             // 0_______ ________ <ASCII in byte 1>
@@ -274,7 +252,7 @@ const Utf8Checker = struct {
         const byte_1_high = shuffleEpi8(tbl1, byte_1_high_0);
         const CARRY: u8 = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
         const byte_1_low0 = prev1 & @splat(32, @as(u8, 0x0F));
-        // const simd8<uint8_t> byte_1_low = (prev1 & 0x0F).lookup_16<uint8_t>(
+        
         const tbl2 = [16]u8{
             // ____0000 ________
             CARRY | OVERLONG_3 | OVERLONG_2 | OVERLONG_4,
@@ -390,8 +368,6 @@ const Utf8Checker = struct {
                 checker.check_utf8_bytes(chunk[2], chunks[1]);
                 checker.check_utf8_bytes(chunk[3], chunk[2]);
             } else unreachable;
-            // checker.prev_incomplete = is_incomplete(input.chunks[simd8x64<uint8_t>::NUM_CHUNKS-1]);
-            // checker.prev_input_block = input.chunks[simd8x64<uint8_t>::NUM_CHUNKS-1];
             checker.prev_incomplete = is_incomplete(chunks[NUM_CHUNKS - 1]);
             checker.prev_input_block = chunks[NUM_CHUNKS - 1];
         }
@@ -407,8 +383,8 @@ const Utf8Checker = struct {
     // e.g. if there is a 4-byte character, but it's 3 bytes from the end.
     //
     inline fn is_incomplete(input: u8x32) u8x32 {
-        // // If the previous input's last 3 bytes match this, they're too short (they ended at EOF):
-        // // ... 1111____ 111_____ 11______
+        // If the previous input's last 3 bytes match this, they're too short (they ended at EOF):
+        // ... 1111____ 111_____ 11______
         const max_array: [32]u8 = .{
             255, 255, 255, 255, 255, 255,            255,            255,
             255, 255, 255, 255, 255, 255,            255,            255,
@@ -475,12 +451,7 @@ const CharacterBlock = struct {
         // hope that useless computations will be omitted. This is namely case when
         // minifying (we only need whitespace).
 
-        //   const uint64_t whitespace = in.eq({
-        //     _mm256_shuffle_epi8(whitespace_table, in.chunks[0]),
-        //     _mm256_shuffle_epi8(whitespace_table, in.chunks[1])
-        //   });
         const in = @bitCast([STEP_SIZE]u8, input_vec);
-        // const in_vec = input_vec.*;
         const chunk0: u8x32 = in[0..32].*;
         const chunk1: u8x32 = in[32..64].*;
         const wss: [2]u8x32 = .{
@@ -489,15 +460,7 @@ const CharacterBlock = struct {
         };
         const whitespace = input_vec == @bitCast(u8x64, wss);
         // Turn [ and ] into { and }
-        //   const simd8x64<uint8_t> curlified{
-        //     in.chunks[0] | 0x20,
-        //     in.chunks[1] | 0x20
-        //   };
         const curlified = input_vec | @splat(64, @as(u8, 0x20));
-        //   const uint64_t op = curlified.eq({
-        //     _mm256_shuffle_epi8(op_table, in.chunks[0]),
-        //     _mm256_shuffle_epi8(op_table, in.chunks[1])
-        //   });
         const ops: [2]u8x32 = .{
             shuffleEpi8(op_table, chunk0),
             shuffleEpi8(op_table, chunk1),
@@ -530,14 +493,6 @@ const Block = struct {
         // then we know that it is irrelevant structurally.
         return block.characters.scalar() & ~block.follows_nonquote_scalar;
     }
-    //   inline fn follows_potential_scalar(block: Block) u64 {
-    //     // _follows_potential_nonquote_scalar: is defined as marking any character that follows a character
-    //     // that is not a structural element ({,},[,],:, comma) nor a quote (") and that is not a
-    //     // white space.
-    //     // It is understood that within quoted region, anything at all could be marked (irrelevant).
-    //     return _follows_potential_nonquote_scalar;
-    //   }
-
     inline fn non_quote_inside_string(block: Block, mask: u64) u64 {
         return block.string.non_quote_inside_string(mask);
     }
@@ -594,7 +549,6 @@ const StructuralIndexer = struct {
             const block_1 = nextBlock(parser, read_buf);
             // println("{b:0>64} | characters.op", .{@bitReverse(u64, block_1.characters.op)});
             try si.next(read_buf, block_1, reader_pos);
-            // TODO: better allocation strategy
             // std.log.debug("stream pos {}", .{try stream.getPos()});
         } else {
             return error.NotImplemented;
@@ -612,7 +566,7 @@ const StructuralIndexer = struct {
         // println("finish idx {}, len {}", .{ idx, len });
         si.bit_indexer.write(idx, si.prev_structurals);
 
-        // TODO:
+        // TODO partial:
         //   error_code error = scanner.finish();
         if (parser.prev_in_string != 0) return error.UNCLOSED_STRING;
         //   // We deliberately break down the next expression so that it is
@@ -675,11 +629,6 @@ const StructuralIndexer = struct {
     }
 
     fn lteq(comptime T: type, chunks: [2]u8x32, m: T) u64 {
-        //   const simd8<T> mask = simd8<T>::splat(m);
-        //   return  simd8x64<bool>(
-        //     this->chunks[0] <= mask,
-        //     this->chunks[1] <= mask
-        //   ).to_bitmask();
         const mask = @splat(32, m);
         const a = chunks[0] <= mask;
         const b = chunks[1] <= mask;
@@ -1210,7 +1159,6 @@ pub const TapeBuilder = struct {
         // count can overflow if it exceeds 24 bits... so we saturate
         // the convention being that a cnt of 0xffffff or more is undetermined in value (>=  0xffffff).
         const cntsat: u32 = std.math.min(@intCast(u32, container.count), 0xFFFFFF);
-        //   tape_writer::write(iter.dom_parser.doc->tape[start_tape_index], next_tape_index(iter) | (uint64_t(cntsat) << 32), start);
 
         // iter.log_line_fmt("", "end_container", "next_tape_index {}", .{tb.next_tape_index()});
         tb.write(start_tape_index, tb.next_tape_index() | (@as(u64, cntsat) << 32), start);
@@ -1267,8 +1215,6 @@ pub const TapeBuilder = struct {
     inline fn visit_number(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log_value("number");
         try NumberParsing.parse_number(value, iter, tb);
-        // TODO: support more number types
-
     }
     inline fn visit_true_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log_value("true");
@@ -1364,7 +1310,8 @@ pub const Parser = struct {
     next_structural_index: u32 = 0,
     doc: Document,
     indexer: StructuralIndexer,
-    open_containers: std.ArrayListUnmanaged(OpenContainerInfo), //std.MultiArrayList(OpenContainerInfo),
+    // TODO: soa
+    open_containers: std.ArrayListUnmanaged(OpenContainerInfo),
     max_depth: u16,
     n_structural_indexes: u32 = 0,
     bytes: []u8 = &[_]u8{},
@@ -1465,7 +1412,6 @@ pub const Parser = struct {
     }
 
     inline fn nextStringBlock(parser: *Parser, input_vec: u8x64) StringBlock {
-        // const input_vec = input_vec.*;
         const backslash_vec = input_vec == @splat(64, @as(u8, '\\'));
         const backslash = @bitCast(u64, backslash_vec);
         const escaped = parser.find_escaped(backslash);
@@ -1498,7 +1444,6 @@ pub const Parser = struct {
         // println("{b:0>64} | @bitCast(i64, in_string) >> 63 ", .{@bitReverse(i64, @bitCast(i64, in_string) >> 63)});
         // println("{b:0>64} | @bitCast(u64, @bitCast(i64, in_string) >> 63) ", .{@bitReverse(u64, @bitCast(u64, @bitCast(i64, in_string) >> 63))});
         parser.prev_in_string = @bitCast(u64, @bitCast(i64, in_string) >> 63);
-        // parser.prev_in_string =  in_string >> 63;
 
         // Use ^ to turn the beginning quote off, and the end quote on.
 
@@ -1588,21 +1533,21 @@ pub fn main() !u8 {
 
 // TODO rename these
 const ElementType = enum(u8) {
-    ///< Array
+    /// Array
     ARRAY = '[',
-    ///< Object
+    /// Object
     OBJECT = '{',
-    ///< i64
+    /// i64
     INT64 = 'l',
-    ///< u64: any integer that fits in u64 but *not* i64
+    /// u64: any integer that fits in u64 but *not* i64
     UINT64 = 'u',
-    ///< double: Any number with a "." or "e" that fits in double.
+    /// double: Any number with a "." or "e" that fits in double.
     DOUBLE = 'd',
-    ///< []const u8
+    /// []const u8
     STRING = '"',
-    ///< bool
+    /// bool
     BOOL = 't',
-    ///< null
+    /// null
     NULL = 'n',
 };
 
