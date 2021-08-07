@@ -1649,13 +1649,25 @@ const TapeRef = struct {
 
     pub fn get_string_length(tr: TapeRef) u32 {
         const string_buf_index = tr.value();
-        var len: u32 = undefined;
-        @memcpy(mem.asBytes(&len), tr.doc.string_buf.ptr + string_buf_index, @sizeOf(u32));
-        return len;
+        return mem.readIntLittle(u32, (tr.doc.string_buf.ptr + string_buf_index)[0..@sizeOf(u32)]);
     }
 
-    pub fn key_c_str(tr: TapeRef) [*:0]const u8 {
+    pub fn get_c_str(tr: TapeRef) [*:0]const u8 {
         return @ptrCast([*:0]const u8, tr.doc.string_buf.ptr + tr.value() + @sizeOf(u32));
+    }
+
+    pub fn get_as_type(tr: TapeRef, comptime T: type) T {
+        comptime assert(@sizeOf(T) == @sizeOf(u64));
+        return @bitCast(T, tr.current_raw());
+    }
+
+    pub fn get_next_as_type(tr: TapeRef, comptime T: type) T {
+        // TODO don't make a copy
+        return (TapeRef{ .doc = tr.doc, .idx = tr.idx + 1 }).get_as_type(T);
+    }
+
+    pub fn get_string(tr: TapeRef) []const u8 {
+        return tr.get_c_str()[0..tr.get_string_length()];
     }
 
     pub fn key_equals(tr: TapeRef, string: []const u8) bool {
@@ -1664,7 +1676,7 @@ const TapeRef = struct {
         const len = tr.get_string_length();
         if (string.len == len) {
             // TODO: We avoid construction of a temporary string_view instance.
-            return mem.eql(u8, string, tr.key_c_str()[0..len]);
+            return mem.eql(u8, string, tr.get_c_str()[0..len]);
         }
         return false;
     }
@@ -1721,7 +1733,7 @@ const Element = struct {
             .DOUBLE => ele.get_double(),
             .STRING => ele.get_string(),
             .BOOL => ele.get_bool(),
-            .NULL => ele.get_null(),
+            .NULL => if (ele.tape.is(.NULL)) Value{ .NULL = {} } else error.INCORRECT_TYPE,
         };
     }
 
@@ -1746,9 +1758,6 @@ const Element = struct {
     pub fn get_bool(ele: Element) !Value {
         return if (ele.get_tape_type(.TRUE)) |e| e else |_| ele.get_tape_type(.FALSE);
     }
-    pub fn get_null(ele: Element) !Value {
-        return ele.get_tape_type(.NULL);
-    }
 
     pub fn get_tape_type(ele: Element, comptime tape_type: TapeType) !Value {
         return switch (ele.tape.tape_ref_type()) {
@@ -1756,28 +1765,28 @@ const Element = struct {
             else => error.INCORRECT_TYPE,
         };
     }
+    pub fn next_tape_value(ele: Element, comptime T: type) T {
+        comptime assert(@sizeOf(T) == @sizeOf(u64));
+        return mem.readIntLittle(T, @ptrCast([*]const u8, ele.tape.doc.tape.items.ptr + ele.tape.idx + 1)[0..8]);
+    }
     pub fn as_tape_type(ele: Element, comptime tape_type: TapeType) !Value {
         return switch (tape_type) {
-            // tape_type => ele.as_tape_type(tape_type),
-            .ROOT, .END_ARRAY, .END_OBJECT, .INVALID => error.INCORRECT_TYPE,
+            .ROOT,
+            .END_ARRAY,
+            .END_OBJECT,
+            .INVALID,
+            .NULL,
+            => error.INCORRECT_TYPE,
             .START_ARRAY => Value{ .ARRAY = .{ .tape = ele.tape } },
             .START_OBJECT => Value{ .OBJECT = .{ .tape = ele.tape } },
-            .STRING => Value{ .STRING = ele.tape.key_c_str()[0..ele.tape.get_string_length()] },
-            .INT64 => error.TODO,
-            .UINT64 => error.TODO,
-            .DOUBLE => error.TODO,
-            .TRUE => error.TODO,
-            .FALSE => error.TODO,
-            .NULL => error.TODO,
+            .STRING => Value{ .STRING = ele.tape.get_string() },
+            .INT64 => Value{ .INT64 = ele.tape.get_next_as_type(i64) },
+            .UINT64 => Value{ .UINT64 = ele.tape.get_next_as_type(u64) },
+            .DOUBLE => Value{ .DOUBLE = ele.tape.get_next_as_type(f64) },
+            .TRUE => Value{ .BOOL = true },
+            .FALSE => Value{ .BOOL = false },
         };
     }
-
-    // pub fn get_object(ele: Element) !Value {
-    //     return switch (ele.tape.tape_ref_type()) {
-    //         .START_ARRAY => .{ .OBJECT = .{ .tape = ele.tape } },
-    //         else => error.INCORRECT_TYPE,
-    //     };
-    // }
 
     pub fn is(ele: Element, ele_type: ElementType) bool {
         return if (ele.get(ele_type)) true else |_| false;
@@ -1883,6 +1892,9 @@ test "float" {
             @bitCast(f64, parser.doc.tape.items[2]),
             0.000000001,
         );
+        const ele = parser.element();
+        const d = try ele.get_double();
+        try testing.expectApproxEqAbs(@as(f64, 123.456), d.DOUBLE, 0.000000001);
     }
     {
         var parser = try Parser.initFixedBuffer(allr, "[-0.000000000000000000000000000000000000000000000000000000000000000000000000000001]", .{});
@@ -1924,4 +1936,13 @@ fn test_search_tape() !void {
     try testing.expect(url != null);
     try testing.expectEqual(url.?.tape.idx, 17);
     try testing.expectEqualStrings("http://ex.com/th.png", (try url.?.get_string()).STRING);
+    const ht = thumb.?.at_key("Height");
+    try testing.expect(ht != null);
+    try testing.expectEqual(@as(i64, 125), (try ht.?.get_int64()).INT64);
+    const priv = ele.at_key("Private");
+    try testing.expect(priv != null);
+    try testing.expectEqual(false, (try priv.?.get_bool()).BOOL);
+    const owner = ele.at_key("Owner");
+    try testing.expect(owner != null);
+    try testing.expectEqual(true, owner.?.is(.NULL));
 }
