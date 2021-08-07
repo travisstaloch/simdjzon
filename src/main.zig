@@ -1291,7 +1291,7 @@ pub const TapeBuilder = struct {
     }
     pub inline fn visit_document_end(tb: *TapeBuilder, iter: *Iterator) !void {
         tb.write(0, tb.next_tape_index(), .ROOT);
-        iter.log_line_fmt("?", "document_end", "open_containers.len {} tape.len {}", .{ iter.parser.open_containers.items.len, tb.tape.items.len });
+        // iter.log_line_fmt("?", "document_end", "open_containers.len {} tape.len {}", .{ iter.parser.open_containers.items.len, tb.tape.items.len });
         return tb.append(iter, 0, .ROOT);
     }
 };
@@ -1615,11 +1615,11 @@ const Object = struct {
     }
 
     pub fn at_pointer(o: Object, _json_pointer: []const u8) Error!Element {
-        if (_json_pointer.len == 0) { // an empty string means that we return the current node
-            return Element{ .tape = o.tape }; // copy the current node
-        } else if (_json_pointer[0] != '/') { // otherwise there is an error
+        if (_json_pointer.len == 0) // an empty string means that we return the current node
+            return Element{ .tape = o.tape } // copy the current node
+        else if (_json_pointer[0] != '/') // otherwise there is an error
             return error.INVALID_JSON_POINTER;
-        }
+
         var json_pointer = _json_pointer[1..];
         const slash = mem.indexOfScalar(u8, json_pointer, '/');
         const key = json_pointer[0 .. slash orelse json_pointer.len];
@@ -1765,13 +1765,50 @@ const Element = struct {
     }
 
     pub fn at_key(ele: Element, key: []const u8) ?Element {
-        return if (ele.get(.OBJECT)) |o| o.OBJECT.at_key(key) else |_| null;
+        return if (ele.get_as_type(.OBJECT)) |o| o.OBJECT.at_key(key) else |_| null;
     }
 
     pub fn at(ele: Element, idx: usize) ?Element {
-        return if (ele.get(.ARRAY)) |a| a.ARRAY.at(idx) else |_| null;
+        return if (ele.get_as_type(.ARRAY)) |a| a.ARRAY.at(idx) else |_| null;
     }
-    pub fn get(ele: Element, ele_type: ElementType) Error!Value {
+    pub fn get(ele: Element, out: anytype) Error!void {
+        const T = @TypeOf(out);
+        const info = @typeInfo(T);
+        switch (info) {
+            .Pointer => {
+                const C = std.meta.Child(T);
+                const child_info = @typeInfo(C);
+                switch (info.Pointer.size) {
+                    .One => {
+                        switch (child_info) {
+                            .Int => out.* = try std.math.cast(C, try if (child_info.Int.signedness == .signed)
+                                ele.get_int64()
+                            else
+                                ele.get_uint64()),
+                            .Float => out.* = @floatCast(C, try ele.get_double()),
+                            .Bool => out.* = try ele.get_bool(),
+                            .Optional => out.* = if (ele.is(.NULL))
+                                null
+                            else blk: {
+                                var x: std.meta.Child(C) = undefined;
+                                try ele.get(&x);
+                                break :blk x;
+                            },
+                            else => @compileError("unsupported type: " ++ @typeName(T) ++ ". int, float, bool or optional type."),
+                        }
+                    },
+                    .Slice => {
+                        const string = try ele.get_string();
+                        @memcpy(@ptrCast([*]u8, out.ptr), string.ptr, std.math.min(string.len, out.len * @sizeOf(C)));
+                    },
+                    else => @compileError("unsupported pointer type: " ++ @typeName(T) ++ ". expecting slice or single item pointer."),
+                }
+            },
+            else => @compileError("unsupported type: " ++ @typeName(T) ++ ". expecting pointer type."),
+        }
+    }
+
+    pub fn get_as_type(ele: Element, ele_type: ElementType) Error!Value {
         return switch (ele_type) {
             .OBJECT => Value{ .OBJECT = try ele.get_object() },
             .ARRAY => Value{ .ARRAY = try ele.get_array() },
@@ -1790,11 +1827,29 @@ const Element = struct {
     pub fn get_object(ele: Element) !Object {
         return (try ele.get_tape_type(.START_OBJECT)).OBJECT;
     }
-    pub fn get_int64(ele: Element) !i64 {
-        return (try ele.get_tape_type(.INT64)).INT64;
+    pub fn get_int64(ele: Element) Error!i64 {
+        return if (!ele.is(.INT64))
+            if (ele.is(.UINT64)) blk: {
+                const result = ele.next_tape_value(u64);
+                break :blk if (result > std.math.maxInt(i64))
+                    error.NUMBER_OUT_OF_RANGE
+                else
+                    @bitCast(i64, result);
+            } else error.INCORRECT_TYPE
+        else
+            ele.next_tape_value(i64);
     }
-    pub fn get_uint64(ele: Element) !u64 {
-        return (try ele.get_tape_type(.UINT64)).UINT64;
+    pub fn get_uint64(ele: Element) Error!u64 {
+        return if (!ele.is(.UINT64))
+            if (ele.is(.INT64)) blk: {
+                const result = ele.next_tape_value(i64);
+                break :blk if (result < 0)
+                    error.NUMBER_OUT_OF_RANGE
+                else
+                    @bitCast(u64, result);
+            } else error.INCORRECT_TYPE
+        else
+            ele.next_tape_value(u64);
     }
     pub fn get_double(ele: Element) !f64 {
         return (try ele.get_tape_type(.DOUBLE)).DOUBLE;
@@ -1840,7 +1895,16 @@ const Element = struct {
     }
 
     pub fn is(ele: Element, ele_type: ElementType) bool {
-        return if (ele.get(ele_type)) true else |_| false;
+        return switch (ele_type) {
+            .OBJECT => ele.tape.is(.START_OBJECT),
+            .ARRAY => ele.tape.is(.START_ARRAY),
+            .STRING => ele.tape.is(.STRING),
+            .INT64 => ele.tape.is(.INT64),
+            .UINT64 => ele.tape.is(.UINT64),
+            .DOUBLE => ele.tape.is(.DOUBLE),
+            .BOOL => ele.tape.is(.TRUE) or ele.tape.is(.FALSE),
+            .NULL => ele.tape.is(.NULL),
+        };
     }
 };
 
@@ -2002,8 +2066,11 @@ fn test_search_tape() !void {
 }
 
 test "json pointer" {
+    try test_json_pointer();
+}
+fn test_json_pointer() !void {
     const input =
-        \\{"a": {"b": [1,2,3]}}
+        \\{"a": {"b": [1,2,3], "c": 3.1415, "d": true, "e": "e-string", "f": null}}
     ;
     var parser = try Parser.initFixedBuffer(allr, input, .{});
     defer parser.deinit();
@@ -2014,14 +2081,50 @@ test "json pointer" {
     try testing.expectEqual(@as(i64, 3), try b2.get_int64());
     try testing.expectError(error.INVALID_JSON_POINTER, parser.element().at_pointer("/a/b/3"));
     try testing.expectError(error.INVALID_JSON_POINTER, parser.element().at_pointer("/c/b"));
+    var i: i64 = undefined;
+    try (try parser.element().at_pointer("/a/b/1")).get(&i);
+    try testing.expectEqual(@as(i64, 2), i);
+    var f: f32 = undefined;
+    try (try parser.element().at_pointer("/a/c")).get(&f);
+    try testing.expectApproxEqAbs(@as(f32, 3.1415), f, 0.00000001);
+    var b = false;
+    try (try parser.element().at_pointer("/a/d")).get(&b);
+    try testing.expectEqual(true, b);
+    var u: u64 = undefined;
+    try (try parser.element().at_pointer("/a/b/2")).get(&u);
+    try testing.expectEqual(@as(u64, 3), u);
+    {
+        var s = [1]u8{'x'} ** 8;
+        try (try parser.element().at_pointer("/a/e")).get(@as([]u8, &s));
+        try testing.expectEqualStrings("e-string", &s);
+    }
+    const expected: [8]u8 = "e-stxxxx".*;
+    {
+        var s = [1]u8{'x'} ** 8;
+        try (try parser.element().at_pointer("/a/e")).get(@as([]u8, s[0..4]));
+        try testing.expectEqualStrings(&expected, &s);
+    }
+    {
+        // this convoluted test just shows you can read string data into slice types other than u8
+        var s = [1]u16{mem.readIntLittle(u16, "xx")} ** 4;
+        try (try parser.element().at_pointer("/a/e")).get(@as([]u16, s[0..2]));
+        const expected_u16s = @bitCast([4]u16, expected);
+        try testing.expectEqualSlices(u16, &expected_u16s, &s);
+    }
+    var opt: ?u8 = undefined;
+    try (try parser.element().at_pointer("/a/f")).get(&opt);
+    try testing.expectEqual(@as(?u8, null), opt);
+    try (try parser.element().at_pointer("/a/b/2")).get(&opt);
+    try testing.expectEqual(@as(?u8, 3), opt);
 }
 
 pub fn main2() !u8 {
     // try test_search_tape();
-    var parser = try Parser.initFile(allr, "../../c/simdjson/jsonexamples/twitter.json", .{});
-    defer parser.deinit();
-    try parser.parse();
-    const count = try parser.element().at_key("search_metadata").?.at_key("count").?.get_int64();
-    try testing.expectEqual(@as(i64, 100), count);
+    // var parser = try Parser.initFile(allr, "../../c/simdjson/jsonexamples/twitter.json", .{});
+    // defer parser.deinit();
+    // try parser.parse();
+    // const count = try parser.element().at_key("search_metadata").?.at_key("count").?.get_int64();
+    // try testing.expectEqual(@as(i64, 100), count);
+    try test_json_pointer();
     return 0;
 }
