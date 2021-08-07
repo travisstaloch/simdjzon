@@ -13,7 +13,7 @@ pub fn build(b: *std.build.Builder) void {
     const mode = b.standardReleaseOptions();
     const target = b.standardTargetOptions(.{});
 
-    const lib = b.addStaticLibrary("zimdjson", "src/main.zig");
+    const lib = b.addStaticLibrary("simdjzon", "src/main.zig");
     setup(lib, mode, target);
     lib.install();
 
@@ -24,7 +24,7 @@ pub fn build(b: *std.build.Builder) void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&main_tests.step);
 
-    const exe = b.addExecutable("zimdjson", "src/main.zig");
+    const exe = b.addExecutable("simdjzon", "src/main.zig");
     setup(exe, mode, target);
     exe.install();
 

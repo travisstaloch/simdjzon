@@ -11,7 +11,7 @@ const NumberParsing = @import("NumberParsing.zig");
 const AtomParsing = @import("AtomParsing.zig");
 
 // pub const log_level: std.log.Level = .debug;
-pub const log_level: std.log.Level = .alert;
+pub const log_level: std.log.Level = .err;
 var debug = log_level == .debug;
 pub fn println(comptime fmt: []const u8, args: anytype) void {
     print(fmt ++ "\n", args);
@@ -1505,14 +1505,13 @@ pub fn main() !u8 {
     }
 
     defer parser.deinit();
-    try parser.parse();
-    // catch |err| switch (err) {
-    //     // error.EndOfStream => {},
-    //     else => {
-    //         std.log.err("parse failed. error {}", .{err});
-    //         return 1;
-    //     },
-    // };
+    parser.parse() catch |err| switch (err) {
+        // error.EndOfStream => {},
+        else => {
+            std.log.err("parse failed. {s}", .{@errorName(err)});
+            return 1;
+        },
+    };
     std.log.debug("parse valid", .{});
     return 0;
 }
