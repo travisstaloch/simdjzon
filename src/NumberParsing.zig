@@ -15,21 +15,20 @@ fn INVALID_NUMBER(src: [*]const u8) Error {
     return error.NUMBER_ERROR;
 }
 
-fn WRITE_DOUBLE(VALUE: f64, _: [*]const u8, WRITER: *TapeBuilder, iter: *Iterator) !void {
-    try (WRITER).append_double(iter, VALUE);
+fn WRITE_DOUBLE(VALUE: f64, _: [*]const u8, WRITER: *TapeBuilder) void {
+     (WRITER).append_double( VALUE);
 }
 
-fn WRITE_INTEGER(VALUE: u64, _: [*]const u8, WRITER: *TapeBuilder, iter: *Iterator) !void {
-    try (WRITER).append_i64(iter, VALUE);
+fn WRITE_INTEGER(VALUE: u64, _: [*]const u8, WRITER: *TapeBuilder) void {
+     (WRITER).append_i64( VALUE);
 }
 
-fn WRITE_UNSIGNED(VALUE: u64, _: [*]const u8, WRITER: *TapeBuilder, iter: *Iterator) !void {
-    try (WRITER).append_u64(iter, VALUE);
+fn WRITE_UNSIGNED(VALUE: u64, _: [*]const u8, WRITER: *TapeBuilder) void {
+     (WRITER).append_u64(VALUE);
 }
 
 pub fn parse_number(
     src: [*]const u8,
-    iter: *Iterator,
     tb: *TapeBuilder,
 ) Error!void {
     const negative = src[0] == '-';
@@ -70,7 +69,7 @@ pub fn parse_number(
     if (is_float) {
         // main.println("is_float {c}", .{p[0]});
         const dirty_end = CharUtils.is_not_structural_or_whitespace(p[0]);
-        try write_float(src, negative, i, start_digits, digit_count, exponent, tb, iter);
+        try write_float(src, negative, i, start_digits, digit_count, exponent, tb);
         if (dirty_end) {
             return INVALID_NUMBER(src);
         }
@@ -90,7 +89,7 @@ pub fn parse_number(
             if (i > @as(u64, std.math.maxInt(i64)) + 1) {
                 return INVALID_NUMBER(src);
             }
-            try WRITE_INTEGER(~i + 1, src, tb, iter);
+            WRITE_INTEGER(~i + 1, src, tb);
             if (CharUtils.is_not_structural_or_whitespace(p[0])) {
                 return INVALID_NUMBER(src);
             }
@@ -114,10 +113,10 @@ pub fn parse_number(
 
     // Write unsigned if it doesn't fit in a signed integer.
     if (i > @as(u64, std.math.maxInt(i64))) {
-        try WRITE_UNSIGNED(i, src, tb, iter);
+        WRITE_UNSIGNED(i, src, tb);
         // try tb.append2(iter, 0, i, .INT64);
     } else {
-        try WRITE_INTEGER(if (negative) (~i +% 1) else i, src, tb, iter);
+        WRITE_INTEGER(if (negative) (~i +% 1) else i, src, tb);
         // try tb.append2(iter, 0, if (negative) (~i +% 1) else i, .INT64);
     }
     // std.log.debug("parse number last '{c}'(0x{x}:{})", .{ p[0], p[0], p[0] });
@@ -233,10 +232,10 @@ fn significant_digits(start_digits: [*]const u8, digit_count: usize) usize {
     return digit_count -% @ptrToInt(start) - @ptrToInt(start_digits);
 }
 
-fn slow_float_parsing(src: [*]const u8, writer: *TapeBuilder, iter: *Iterator) !void {
+fn slow_float_parsing(src: [*]const u8, writer: *TapeBuilder) !void {
     var d: f64 = undefined;
     if (parse_float_fallback(src, &d)) {
-        try writer.append_double(iter, d);
+        writer.append_double( d);
         return;
     }
     return INVALID_NUMBER(src);
@@ -725,7 +724,7 @@ fn parse_float_fallback(ptr: [*]const u8, outDouble: *f64) bool {
     return !(outDouble.* > std.math.f64_max or outDouble.* < -std.math.f64_max);
 }
 
-fn write_float(src: [*]const u8, negative: bool, i: u64, start_digits: [*]const u8, digit_count: usize, exponent: i64, writer: *TapeBuilder, iter: *Iterator) !void {
+fn write_float(src: [*]const u8, negative: bool, i: u64, start_digits: [*]const u8, digit_count: usize, exponent: i64, writer: *TapeBuilder, ) !void {
     // If we frequently had to deal with long strings of digits,
     // we could extend our code by using a 128-bit integer instead
     // of a 64-bit integer. However, this is uncommon in practice.
@@ -746,7 +745,7 @@ fn write_float(src: [*]const u8, negative: bool, i: u64, start_digits: [*]const 
         // it, it would force it to be stored in memory, preventing the compiler from picking it apart
         // and putting into registers. i.e. if we pass it as reference, it gets slow.
         // This is what forces the skip_double, as well.
-        return slow_float_parsing(src, writer, iter);
+        return slow_float_parsing(src, writer);
         // TLS: don't need to call skip_double(). maybe in the future i'll discover that it would be
         // faster to pass a copy somewhere and decide to put it back.
     }
@@ -761,7 +760,7 @@ fn write_float(src: [*]const u8, negative: bool, i: u64, start_digits: [*]const 
         if (smallest_power > -342) @compileError("smallest_power is not small enough");
         //
         if (exponent < smallest_power or i == 0) {
-            try WRITE_DOUBLE(0, src, writer, iter);
+             WRITE_DOUBLE(0, src, writer);
             return;
         } else { // (exponent > largest_power) and (i != 0)
             // We have, for sure, an infinite value and simdjson refuses to parse infinite values.
@@ -778,7 +777,7 @@ fn write_float(src: [*]const u8, negative: bool, i: u64, start_digits: [*]const 
             return INVALID_NUMBER(src);
         }
     }
-    try WRITE_DOUBLE(d, src, writer, iter);
+    WRITE_DOUBLE(d, src, writer);
 }
 
 const smallest_power = -342;

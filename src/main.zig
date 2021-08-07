@@ -21,8 +21,8 @@ pub fn print(comptime fmt: []const u8, args: anytype) void {
         std.debug.print(fmt, args);
     // std.log.debug(fmt, args);
 }
-fn print_vec(name: []const u8, vec: u8x32) void {
-    println("{s}: {any}", .{ name, @as([32]u8, vec) });
+fn print_vec(name: []const u8, vec: anytype) void {
+    println("{s}: {any}", .{ name, @as([@sizeOf(@TypeOf(vec))]u8, vec) });
 }
 
 inline fn SIMDJSON_ROUNDUP_N(a: anytype, n: @TypeOf(a)) @TypeOf(a) {
@@ -202,7 +202,6 @@ const Utf8Checker = struct {
         };
     }
     // zig fmt: off
-    // TODO reformat
     inline fn check_special_cases(input: u8x32, prev1: u8x32) u8x32 {
         // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
         // Bit 1 = Too Long (ASCII followed by continuation)
@@ -210,26 +209,26 @@ const Utf8Checker = struct {
         // Bit 4 = Surrogate
         // Bit 5 = Overlong 2-byte
         // Bit 7 = Two Continuations
-        const TOO_SHORT: u8 = 1 << 0; // 11______ 0_______
-        // 11______ 11______
-        const TOO_LONG: u8 = 1 << 1; // 0_______ 10______
-        const OVERLONG_3: u8 = 1 << 2; // 11100000 100_____
-        const SURROGATE: u8 = 1 << 4; // 11101101 101_____
-        const OVERLONG_2: u8 = 1 << 5; // 1100000_ 10______
-        const TWO_CONTS: u8 = 1 << 7; // 10______ 10______
-        const TOO_LARGE: u8 = 1 << 3; // 11110100 1001____
-        // 11110100 101_____
-        // 11110101 1001____
-        // 11110101 101_____
-        // 1111011_ 1001____
-        // 1111011_ 101_____
-        // 11111___ 1001____
-        // 11111___ 101_____
+        const TOO_SHORT: u8 = 1 << 0;   // 11______ 0_______
+                                        // 11______ 11______
+        const TOO_LONG: u8 = 1 << 1;    // 0_______ 10______
+        const OVERLONG_3: u8 = 1 << 2;  // 11100000 100_____
+        const SURROGATE: u8 = 1 << 4;   // 11101101 101_____
+        const OVERLONG_2: u8 = 1 << 5;  // 1100000_ 10______
+        const TWO_CONTS: u8 = 1 << 7;   // 10______ 10______
+        const TOO_LARGE: u8 = 1 << 3;   // 11110100 1001____
+                                        // 11110100 101_____
+                                        // 11110101 1001____
+                                        // 11110101 101_____
+                                        // 1111011_ 1001____
+                                        // 1111011_ 101_____
+                                        // 11111___ 1001____
+                                        // 11111___ 101_____
         const TOO_LARGE_1000: u8 = 1 << 6;
-        // 11110101 1000____
-        // 1111011_ 1000____
-        // 11111___ 1000____
-        const OVERLONG_4: u8 = 1 << 6; // 11110000 1000____
+                                        // 11110101 1000____
+                                        // 1111011_ 1000____
+                                        // 11111___ 1000____
+        const OVERLONG_4: u8 = 1 << 6;  // 11110000 1000____
 
         const byte_1_high_0 = prev1 >> @splat(32, @as(u3, 4));
         const tbl1 = [16]u8{
@@ -259,7 +258,7 @@ const Utf8Checker = struct {
             // ____001_ ________
             CARRY,
             CARRY,
-
+            
             // ____0100 ________
             CARRY | TOO_LARGE,
             // ____0101 ________
@@ -281,22 +280,19 @@ const Utf8Checker = struct {
         } ** 2;
         const byte_1_low = shuffleEpi8(tbl2, byte_1_low0);
 
-        // const simd8<uint8_t> byte_2_high = input.shr<4>().lookup_16<uint8_t>(
         const byte_2_high_0 = input >> @splat(32, @as(u3, 4));
         const tbl3 = [16]u8{
             // ________ 0_______ <ASCII in byte 2>
-            TOO_SHORT,                                                                    TOO_SHORT,                                                  TOO_SHORT,                                                 TOO_SHORT,
-            TOO_SHORT,                                                                    TOO_SHORT,                                                  TOO_SHORT,                                                 TOO_SHORT,
-
+            TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
+            TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
             // ________ 1000____
             TOO_LONG | OVERLONG_2 | TWO_CONTS | OVERLONG_3 | TOO_LARGE_1000 | OVERLONG_4,
             // ________ 1001____
             TOO_LONG | OVERLONG_2 | TWO_CONTS | OVERLONG_3 | TOO_LARGE,
             // ________ 101_____
             TOO_LONG | OVERLONG_2 | TWO_CONTS | SURROGATE | TOO_LARGE, TOO_LONG | OVERLONG_2 | TWO_CONTS | SURROGATE | TOO_LARGE,
-
             // ________ 11______
-            TOO_SHORT,                                                                    TOO_SHORT,                                                  TOO_SHORT,                                                 TOO_SHORT,
+            TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
         } ** 2;
         const byte_2_high = shuffleEpi8(tbl3, byte_2_high_0);
         return (byte_1_high & byte_1_low & byte_2_high);
@@ -842,14 +838,14 @@ pub const Iterator = struct {
                     if (iter.peek()[0] == '}') {
                         _ = iter.advance();
                         iter.log_value("empty object");
-                        try visitor.visit_empty_object(iter);
+                        try visitor.visit_empty_object();
                     } else break :blk .object_begin;
                 },
                 '[' => {
                     if (iter.peek()[0] == ']') {
                         _ = iter.advance();
                         iter.log_value("empty array");
-                        try visitor.visit_empty_array(iter);
+                        try visitor.visit_empty_array();
                     } else break :blk .array_begin;
                 },
                 else => try visitor.visit_root_primitive(iter, value),
@@ -903,12 +899,12 @@ pub const Iterator = struct {
             '{' => if (iter.peek()[0] == '}') {
                 _ = iter.advance();
                 iter.log_value("empty object");
-                try visitor.visit_empty_object(iter);
+                try visitor.visit_empty_object();
             } else return .object_begin,
             '[' => if (iter.peek()[0] == ']') {
                 _ = iter.advance();
                 iter.log_value("empty array");
-                try visitor.visit_empty_array(iter);
+                try visitor.visit_empty_array();
             } else return .array_begin,
             else => try visitor.visit_primitive(iter, value),
         }
@@ -973,14 +969,14 @@ pub const Iterator = struct {
                 if (iter.peek()[0] == '}') {
                     _ = iter.advance();
                     iter.log_value("empty object");
-                    try visitor.visit_empty_object(iter);
+                    try visitor.visit_empty_object();
                 } else return .object_begin;
             },
             '[' => {
                 if (iter.peek()[0] == ']') {
                     _ = iter.advance();
                     iter.log_value("empty array");
-                    try visitor.visit_empty_array(iter);
+                    try visitor.visit_empty_array();
                 } else return .array_begin;
             },
             else => try visitor.visit_primitive(iter, value),
@@ -1017,7 +1013,7 @@ pub const Iterator = struct {
 
     inline fn document_end(iter: *Iterator, visitor: *TapeBuilder) Error!void {
         iter.log_end_value("document");
-        try visitor.visit_document_end(iter);
+        try visitor.visit_document_end();
         iter.parser.next_structural_index = try ptr_diff(
             u32,
             iter.next_structural,
@@ -1085,22 +1081,27 @@ pub const TapeBuilder = struct {
         };
     }
 
-    pub inline fn append(tb: *TapeBuilder, iter: *Iterator, val: u64, tt: TapeType) !void {
-        _ = iter;
+    pub inline fn append(tb: *TapeBuilder, val: u64, tt: TapeType) void {
         // iter.log_line_fmt("", "append", "val {} tt {}", .{ val, tt });
-        try tb.tape.append(iter.parser.allocator, val | tt.as_u64());
+        tb.tape.appendAssumeCapacity(val | tt.as_u64());
     }
 
-    pub inline fn append_double(tb: *TapeBuilder, iter: *Iterator, val: f64) !void {
-        return tb.append2(iter, 0, @bitCast(u64, val), .DOUBLE);
+    pub inline fn append2(tb: *TapeBuilder, val: u64, val2: anytype, tt: TapeType) void {
+        tb.append(val, tt);
+        assert(@sizeOf(@TypeOf(val2)) == 8);
+        tb.tape.appendAssumeCapacity(val2);
     }
 
-    pub inline fn append_i64(tb: *TapeBuilder, iter: *Iterator, val: u64) !void {
-        return tb.append2(iter, 0, val, .INT64);
+    pub inline fn append_double(tb: *TapeBuilder, val: f64) void {
+        tb.append2(0, @bitCast(u64, val), .DOUBLE);
     }
 
-    pub inline fn append_u64(tb: *TapeBuilder, iter: *Iterator, val: u64) !void {
-        return tb.append2(iter, 0, val, .UINT64);
+    pub inline fn append_i64(tb: *TapeBuilder, val: u64) void {
+        tb.append2(0, val, .INT64);
+    }
+
+    pub inline fn append_u64(tb: *TapeBuilder, val: u64) void {
+        tb.append2(0, val, .UINT64);
     }
 
     pub inline fn write(tb: *TapeBuilder, idx: usize, val: u64, tt: TapeType) void {
@@ -1113,29 +1114,22 @@ pub const TapeBuilder = struct {
         return @intCast(u32, tb.tape.items.len);
     }
 
-    pub inline fn skip(tb: TapeBuilder, allocator: *mem.Allocator) !void {
-        _ = try tb.tape.addOne(allocator);
+    pub inline fn skip(tb: TapeBuilder) void {
+        _ = tb.tape.addOneAssumeCapacity();
     }
 
-    pub inline fn skip_double(tb: TapeBuilder, allocator: *mem.Allocator) !void {
-        _ = tb;
-        _ = allocator;
-        // _ = try tb.tape.addManyAsArray(allocator, 2);
-    }
-
-    pub inline fn empty_container(tb: *TapeBuilder, iter: *Iterator, start: TapeType, end: TapeType) Error!void {
+    pub inline fn empty_container(tb: *TapeBuilder, start: TapeType, end: TapeType) void {
         const start_index = tb.next_tape_index();
-        try tb.append(iter, start_index + 2, start);
-        try tb.append(iter, start_index, end);
+        tb.append(start_index + 2, start);
+        tb.append(start_index, end);
     }
 
     pub inline fn start_container(
         tb: TapeBuilder,
         open_containers: *std.ArrayListUnmanaged(OpenContainerInfo),
-        allocator: *mem.Allocator,
         is_array: bool,
         count: u32,
-    ) !void {
+    ) void {
         const tape_idx = tb.next_tape_index();
         open_containers.appendAssumeCapacity(.{
             .is_array = is_array,
@@ -1144,15 +1138,15 @@ pub const TapeBuilder = struct {
                 .count = count,
             },
         });
-        return tb.skip(allocator);
+        tb.skip();
     }
 
-    pub inline fn end_container(tb: *TapeBuilder, iter: *Iterator, start: TapeType, end: TapeType) Error!void {
+    pub inline fn end_container(tb: *TapeBuilder, iter: *Iterator, start: TapeType, end: TapeType) void {
         // Write the ending tape element, pointing at the start location
         const container = iter.parser.open_containers.items[iter.depth].open_container;
         defer iter.parser.open_containers.shrinkRetainingCapacity(iter.depth);
         const start_tape_index = container.tape_index;
-        try tb.append(iter, start_tape_index, end);
+        tb.append(start_tape_index, end);
         // Write the start tape element, pointing at the end location (and including count)
         // count can overflow if it exceeds 24 bits... so we saturate
         // the convention being that a cnt of 0xffffff or more is undetermined in value (>=  0xffffff).
@@ -1164,7 +1158,7 @@ pub const TapeBuilder = struct {
 
     inline fn on_start_string(tb: *TapeBuilder, iter: *Iterator) ![*]u8 {
         // iter.log_line_fmt("", "start_string", "iter.parser.doc.string_buf.len {}", .{iter.parser.doc.string_buf.len});
-        try tb.append(iter, @ptrToInt(tb.current_string_buf_loc) - @ptrToInt(iter.parser.doc.string_buf.ptr), .STRING);
+        tb.append(@ptrToInt(tb.current_string_buf_loc) - @ptrToInt(iter.parser.doc.string_buf.ptr), .STRING);
         return tb.current_string_buf_loc + @sizeOf(u32);
     }
     inline fn on_end_string(tb: *TapeBuilder, iter: *Iterator, dst: [*]u8) !void {
@@ -1190,12 +1184,6 @@ pub const TapeBuilder = struct {
         tb.current_string_buf_loc += str_len + 1 + @sizeOf(u32);
     }
 
-    pub inline fn append2(tb: *TapeBuilder, iter: *Iterator, val: u64, val2: anytype, tt: TapeType) !void {
-        try tb.append(iter, val, tt);
-        assert(@sizeOf(@TypeOf(val2)) == 8);
-        try tb.tape.append(iter.parser.allocator, val2);
-    }
-
     inline fn visit_root_primitive(visitor: *TapeBuilder, iter: *Iterator, value: [*]const u8) !void {
         return switch (value[0]) {
             '"' => visitor.visit_string(iter, value, false),
@@ -1212,25 +1200,25 @@ pub const TapeBuilder = struct {
 
     inline fn visit_number(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log_value("number");
-        try NumberParsing.parse_number(value, iter, tb);
+        try NumberParsing.parse_number(value, tb);
     }
     inline fn visit_true_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log_value("true");
         assert(value[0] == 't');
         if (!try AtomParsing.is_valid_true_atom(value + 1)) return error.T_ATOM_ERROR;
-        try tb.append(iter, 0, TapeType.TRUE);
+        tb.append(0, TapeType.TRUE);
     }
     inline fn visit_false_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log_value("false");
         assert(value[0] == 'f');
         if (!try AtomParsing.is_valid_false_atom(value + 1)) return error.T_ATOM_ERROR;
-        try tb.append(iter, 0, TapeType.FALSE);
+        tb.append(0, TapeType.FALSE);
     }
     inline fn visit_null_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log_value("null");
         assert(value[0] == 'n');
         if (!try AtomParsing.is_valid_null_atom(value + 1)) return error.T_ATOM_ERROR;
-        try tb.append(iter, 0, TapeType.NULL);
+        tb.append(0, TapeType.NULL);
     }
 
     inline fn visit_primitive(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) !void {
@@ -1262,16 +1250,16 @@ pub const TapeBuilder = struct {
         return tb.visit_string(iter, value, true);
     }
 
-    pub inline fn visit_empty_object(tb: *TapeBuilder, iter: *Iterator) Error!void {
-        return tb.empty_container(iter, .START_OBJECT, .END_OBJECT);
+    pub inline fn visit_empty_object(tb: *TapeBuilder) Error!void {
+        return tb.empty_container(.START_OBJECT, .END_OBJECT);
     }
 
-    pub inline fn visit_empty_array(tb: *TapeBuilder, iter: *Iterator) Error!void {
-        return tb.empty_container(iter, .START_ARRAY, .END_ARRAY);
+    pub inline fn visit_empty_array(tb: *TapeBuilder) Error!void {
+        return tb.empty_container(.START_ARRAY, .END_ARRAY);
     }
 
     pub inline fn visit_array_start(tb: *TapeBuilder, iter: *Iterator) !void {
-        return tb.start_container(&iter.parser.open_containers, iter.parser.allocator, true, 0);
+        return tb.start_container(&iter.parser.open_containers, true, 0);
     }
 
     pub inline fn visit_array_end(tb: *TapeBuilder, iter: *Iterator) !void {
@@ -1279,18 +1267,18 @@ pub const TapeBuilder = struct {
     }
 
     pub inline fn visit_object_start(tb: *TapeBuilder, iter: *Iterator) !void {
-        return tb.start_container(&iter.parser.open_containers, iter.parser.allocator, false, 0);
+        return tb.start_container(&iter.parser.open_containers, false, 0);
     }
     pub inline fn visit_object_end(tb: *TapeBuilder, iter: *Iterator) !void {
         return tb.end_container(iter, .START_OBJECT, .END_OBJECT);
     }
     pub inline fn visit_document_start(tb: *TapeBuilder, iter: *Iterator) !void {
-        return tb.start_container(&iter.parser.open_containers, iter.parser.allocator, false, 0);
+        return tb.start_container(&iter.parser.open_containers, false, 0);
     }
-    pub inline fn visit_document_end(tb: *TapeBuilder, iter: *Iterator) !void {
+    pub inline fn visit_document_end(tb: *TapeBuilder) !void {
         tb.write(0, tb.next_tape_index(), .ROOT);
         // iter.log_line_fmt("?", "document_end", "open_containers.len {} tape.len {}", .{ iter.parser.open_containers.items.len, tb.tape.items.len });
-        return tb.append(iter, 0, .ROOT);
+        return tb.append(0, .ROOT);
     }
 };
 
@@ -2140,7 +2128,7 @@ fn test_json_pointer() !void {
         try testing.expectEqualStrings(&expected, &s);
     }
     {
-        // this convoluted test just shows you can read string data into slice types other than u8
+        // this contrived example shows you can read string data into slice types other than u8
         var s = [1]u16{mem.readIntLittle(u16, "xx")} ** 4;
         try (try parser.element().at_pointer("/a/e")).get(s[0..2]);
         const expected_u16s = @bitCast([4]u16, expected);
@@ -2153,7 +2141,7 @@ fn test_json_pointer() !void {
     try testing.expectEqual(@as(?u8, 3), opt);
 }
 
-test "get slice with array" {
+test "get with slice/array" {
     const input =
         \\[1,2,3,4]
     ;
@@ -2186,6 +2174,6 @@ pub fn main2() !u8 {
     // try parser.parse();
     // const count = try parser.element().at_key("search_metadata").?.at_key("count").?.get_int64();
     // try testing.expectEqual(@as(i64, 100), count);
-    try test_json_pointer();
+    // try test_json_pointer();
     return 0;
 }
