@@ -1528,6 +1528,12 @@ pub const Parser = struct {
         }
         return parser.stage2();
     }
+
+    pub fn element(parser: Parser) Element {
+        return .{
+            .tape = .{ .doc = &parser.doc, .idx = 1 },
+        };
+    }
 };
 
 pub fn main() !u8 {
@@ -1561,6 +1567,222 @@ pub fn main() !u8 {
     std.log.debug("parse valid", .{});
     return 0;
 }
+
+const ElementType = enum(u8) {
+    ///< dom::array
+    ARRAY = '[',
+    ///< dom::object
+    OBJECT = '{',
+    ///< int64_t
+    INT64 = 'l',
+    ///< uint64_t: any integer that fits in uint64_t but *not* int64_t
+    UINT64 = 'u',
+    ///< double: Any number with a "." or "e" that fits in double.
+    DOUBLE = 'd',
+    ///< std::string_view
+    STRING = '"',
+    ///< bool
+    BOOL = 't',
+    ///< null
+    NULL = 'n',
+};
+
+const Array = struct {
+    tape: TapeRef,
+};
+const Object = struct {
+    tape: TapeRef,
+    pub fn at_key(o: Object, key: []const u8) ?Element {
+        var it = TapeRefIterator.init(.{ .doc = o.tape.doc, .idx = o.tape.idx + 1 }, o.tape.after_element() - 1);
+        while (true) {
+            if (it.tape.key_equals(key))
+                return Element{ .tape = .{ .doc = it.tape.doc, .idx = it.tape.idx + 1 } };
+            _ = it.next() orelse break;
+        }
+        return null;
+    }
+};
+const Value = union(ElementType) {
+    NULL,
+    BOOL: bool,
+    INT64: i64,
+    UINT64: u64,
+    DOUBLE: f64,
+    STRING: []const u8,
+    ARRAY: Array,
+    OBJECT: Object,
+};
+const TapeRef = struct {
+    doc: *const Document,
+    idx: usize,
+
+    pub inline fn is(tr: TapeRef, tt: TapeType) bool {
+        return tr.tape_ref_type() == tt;
+    }
+    pub inline fn tape_ref_type(tr: TapeRef) TapeType {
+        return TapeType.from_u64(tr.current_raw());
+    }
+    pub inline fn value(tr: TapeRef) u64 {
+        return TapeType.extract_value(tr.current_raw());
+    }
+    pub inline fn after_element(tr: TapeRef) u64 {
+        return switch (tr.tape_ref_type()) {
+            .START_ARRAY, .START_OBJECT => tr.matching_brace_idx(),
+            .UINT64, .INT64, .DOUBLE => tr.idx + 2,
+            else => tr.idx + 1,
+        };
+    }
+    pub inline fn matching_brace_idx(tr: TapeRef) u32 {
+        const result = @truncate(u32, tr.current_raw());
+        std.log.debug("TapeRef matching_brace_idx() for {} {}", .{ tr.tape_ref_type(), result });
+        return result;
+        // return tr.value() + tr.scope_count();
+
+    }
+    pub inline fn current_raw(tr: TapeRef) u64 {
+        std.log.debug("TapeRef current() idx {} len {}", .{ tr.idx, tr.doc.tape.items.len });
+        return tr.doc.tape.items[tr.idx];
+    }
+    pub inline fn scope_count(tr: TapeRef) u32 {
+        return @truncate(u32, (tr.current_raw() >> 32) & TapeType.count_mask);
+    }
+
+    pub fn get_string_length(tr: TapeRef) u32 {
+        const string_buf_index = tr.value();
+        var len: u32 = undefined;
+        @memcpy(mem.asBytes(&len), tr.doc.string_buf.ptr + string_buf_index, @sizeOf(u32));
+        return len;
+    }
+
+    pub fn key_c_str(tr: TapeRef) [*:0]const u8 {
+        return @ptrCast([*:0]const u8, tr.doc.string_buf.ptr + tr.value() + @sizeOf(u32));
+    }
+
+    pub fn key_equals(tr: TapeRef, string: []const u8) bool {
+        // We use the fact that the key length can be computed quickly
+        // without access to the string buffer.
+        const len = tr.get_string_length();
+        if (string.len == len) {
+            // TODO: We avoid construction of a temporary string_view instance.
+            return mem.eql(u8, string, tr.key_c_str()[0..len]);
+        }
+        return false;
+    }
+};
+
+const TapeRefIterator = struct {
+    tape: TapeRef,
+    end_idx: u64,
+
+    pub fn init(tape: TapeRef, end_idx: u64) TapeRefIterator {
+        return .{
+            .tape = tape,
+            .end_idx = end_idx,
+        };
+    }
+    pub fn next(tri: *TapeRefIterator) ?TapeRef {
+        tri.tape.idx += 1;
+        tri.tape.idx = tri.tape.after_element();
+        return if (tri.tape.idx >= tri.end_idx) null else tri.tape;
+    }
+};
+const Element = struct {
+    tape: TapeRef,
+
+    pub inline fn at_pointer(ele: Element, json_pointer: []const u8) ?Element {
+        return switch (ele.tape.tape_ref_type()) {
+            .START_OBJECT => ele.object(tape).at_pointer(json_pointer),
+            .START_ARRAY => ele.array(tape).at_pointer(json_pointer),
+            else => if (!json_pointer.len == 0) // a non-empty string is invalid on an atom
+                INVALID_JSON_POINTER
+            else
+                ele,
+            // an empty string means that we return the current node
+            //   dom::element copy(*this);
+            //   return simdjson_result<element>(std::move(copy));
+
+        };
+    }
+
+    pub fn at_key(ele: Element, key: []const u8) ?Element {
+        return if (ele.get(.OBJECT)) |o| o.OBJECT.at_key(key) else |_| null;
+    }
+
+    pub fn at(ele: Element, idx: usize) ?Element {
+        return if (ele.get(.ARRAY)) |o| o.at(idx) else null;
+    }
+    const E = error{INCORRECT_TYPE};
+    pub fn get(ele: Element, ele_type: ElementType) E!Value {
+        return switch (ele_type) {
+            .OBJECT => ele.get_object(),
+            .ARRAY => ele.get_array(),
+            .INT64 => ele.get_int64(),
+            .UINT64 => ele.get_uint64(),
+            .DOUBLE => ele.get_double(),
+            .STRING => ele.get_string(),
+            .BOOL => ele.get_bool(),
+            .NULL => ele.get_null(),
+        };
+    }
+
+    pub fn get_array(ele: Element) !Value {
+        return ele.get_tape_type(.START_ARRAY);
+    }
+    pub fn get_object(ele: Element) !Value {
+        return ele.get_tape_type(.START_OBJECT);
+    }
+    pub fn get_int64(ele: Element) !Value {
+        return ele.get_tape_type(.INT64);
+    }
+    pub fn get_uint64(ele: Element) !Value {
+        return ele.get_tape_type(.UINT64);
+    }
+    pub fn get_double(ele: Element) !Value {
+        return ele.get_tape_type(.DOUBLE);
+    }
+    pub fn get_string(ele: Element) !Value {
+        return ele.get_tape_type(.STRING);
+    }
+    pub fn get_bool(ele: Element) !Value {
+        return if (ele.get_tape_type(.TRUE)) |e| e else |_| ele.get_tape_type(.FALSE);
+    }
+    pub fn get_null(ele: Element) !Value {
+        return ele.get_tape_type(.NULL);
+    }
+
+    pub fn get_tape_type(ele: Element, comptime tape_type: TapeType) !Value {
+        return switch (ele.tape.tape_ref_type()) {
+            tape_type => ele.as_tape_type(tape_type),
+            else => error.INCORRECT_TYPE,
+        };
+    }
+    pub fn as_tape_type(ele: Element, comptime tape_type: TapeType) !Value {
+        return switch (tape_type) {
+            // tape_type => ele.as_tape_type(tape_type),
+            .ROOT, .END_ARRAY, .END_OBJECT, .INVALID => error.INCORRECT_TYPE,
+            .START_ARRAY => Value{ .ARRAY = .{ .tape = ele.tape } },
+            .START_OBJECT => Value{ .OBJECT = .{ .tape = ele.tape } },
+            .STRING => Value{ .STRING = ele.tape.key_c_str()[0..ele.tape.get_string_length()] },
+            .INT64 => error.TODO,
+            .UINT64 => error.TODO,
+            .DOUBLE => error.TODO,
+            .TRUE => error.TODO,
+            .FALSE => error.TODO,
+            .NULL => error.TODO,
+        };
+    }
+
+    // pub fn get_object(ele: Element) !Value {
+    //     return switch (ele.tape.tape_ref_type()) {
+    //         .START_ARRAY => .{ .OBJECT = .{ .tape = ele.tape } },
+    //         else => error.INCORRECT_TYPE,
+    //     };
+    // }
+
+    pub fn is(ele: Element, ele_type: ElementType) bool {
+        return if (ele.get(ele_type)) true else |_| false;
+    }
+};
 
 const allr = testing.allocator;
 test "tape build" {
@@ -1678,4 +1900,28 @@ test "float" {
             std.math.f64_epsilon,
         );
     }
+}
+
+test "search tape" {
+    try test_search_tape();
+}
+pub fn main2() !u8 {
+    try test_search_tape();
+    return 0;
+}
+
+fn test_search_tape() !void {
+    var parser = try Parser.initFile(allr, "test/test.json", .{});
+    defer parser.deinit();
+    try parser.parse();
+    const ele = parser.element();
+    const thumb = ele.at_key("Thumbnail");
+    try testing.expect(thumb != null);
+    try testing.expectEqual(thumb.?.tape.scope_count(), 3);
+    try testing.expect(thumb.?.is(.OBJECT));
+    try testing.expectEqual(thumb.?.tape.idx, 15);
+    const url = thumb.?.at_key("Url");
+    try testing.expect(url != null);
+    try testing.expectEqual(url.?.tape.idx, 17);
+    try testing.expectEqualStrings("http://ex.com/th.png", (try url.?.get_string()).STRING);
 }
