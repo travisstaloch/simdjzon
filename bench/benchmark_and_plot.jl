@@ -13,7 +13,7 @@ json_files = map(first, json_files_names)
 json_names = map(last, json_files_names)
 
 parsers_names = [
-    ("../../json5parser/zig_json", "zig std lib"),
+    ("bin/zig_json", "zig std lib"),
     ("../../JSONTestSuite/simdjson/simdjson", "c++ simdjson"),
     ("../zig-out/bin/simdjzon", "zig simdjzon"),
     # ("./jq_validate.sh", "jq"),
@@ -44,19 +44,19 @@ function bench(parser, json_file, i, j; dry_run=false, debug=false)
 end
 
     
-    # dry run to warm up cache
+# dry run to warm up cache
 for parser in parsers, json_file in json_files
     bench(parser, json_file, 1, 1; dry_run=true)
 end
 num_runs = 10
-    # gather data
+# gather data
 for j in 1:num_runs, (i, json_file) in enumerate(json_files)
     for parser in parsers
         bench(parser, json_file, i, j; debug=false)
     end
 end
 
-    # average the results
+# average the results
 _mn = [[] for _ in parsers]
 parser_idx = 1
 for parser in parsers
@@ -67,7 +67,7 @@ for parser in parsers
     global parser_idx += 1
 end
 
-    # prepare for plotting
+# prepare for plotting
 lenp = length(parsers)
 lenf = length(json_files)
 json_file_sizes_kb = map(x -> filesize(x) ÷ 1000, json_files)
@@ -76,7 +76,7 @@ nam = repeat(json_names_lens, inner=lenp)
 sx = repeat(parser_names, outer=lenf)
 
 
-    # reshape, flipping rows/cols
+# reshape, flipping rows/cols
 dim1 = length(_mn)
 dim2 = length(_mn[1])
 matrix = Array{eltype(_mn[1]),2}(undef, dim1, dim2)
@@ -94,7 +94,7 @@ p[2] = groupedbar(nam, mn, group=sx, ylabel="milliseconds",
 plot(p..., layout=l)
 savefig("validation_grouped.png")
 
-    # old line plot
+# old line plot
 if false
     using Plots
     x = 1:fileslen

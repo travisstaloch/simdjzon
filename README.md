@@ -97,6 +97,7 @@ $ echo $?
 ```
 
 ### timed against simdjson, go, nim, zig std lib
+The simdjson binary was compiled as shown above.  Go and nim binaries created with sources from JSONTestSuite. [zig std lib driver](bench/src/zig_json.zig).
 Validation times for several large json files.  Created with [benchmark_and_plot.jl](bench/benchmark_and_plot.jl)
 ![results](https://github.com/travisstaloch/simdjson-zig/blob/media/bench/validation_grouped.png)
 
