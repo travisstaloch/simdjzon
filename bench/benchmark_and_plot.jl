@@ -1,11 +1,10 @@
+using Plots.Dates
 using StatsPlots
-
 
 json_files_names = [
     ["../../../nim/godot_test/_godotapi/api.json","godot_api.json"],
     ["../../../nim/godot-nim-stub/_godotapi/api.json","godot_api2.json"],
     ["../../../impala/anydsl/llvm_build/compile_commands.json","llvm_compile_commands.json"],
-    # "../../../web/vue-babylonjs/package-lock.json","lock.json",
     ["../../../web/vuegl-pool/package-lock.json","vuegl_pkg_lock.json"],
     ["../../../c/simdjson/jsonexamples/twitter.json","simdjson_twitter.json"],
 ]
@@ -13,22 +12,20 @@ json_files = map(first, json_files_names)
 json_names = map(last, json_files_names)
 
 parsers_names = [
-    ("bin/zig_json", "zig std lib"),
-    ("../../JSONTestSuite/simdjson/simdjson", "c++ simdjson"),
-    ("../zig-out/bin/simdjzon", "zig simdjzon"),
-    # ("./jq_validate.sh", "jq"),
-    ("../../JSONTestSuite/parsers/test_nim/test_json", "nim json"),
-    ("../../JSONTestSuite/parsers/test_go/test_json", "go json"),
-    # ("./js_bench.sh", "js json"),
-    ]
-    
+    ["bin/zig_json", "zig std lib"],
+    ["../../JSONTestSuite/simdjson/simdjson", "c++ simdjson"],
+    ["../zig-out/bin/simdjzon", "zig simdjzon"],
+    ["../../JSONTestSuite/parsers/test_nim/test_json", "nim json"],
+    ["../../JSONTestSuite/parsers/test_go/test_json", "go json"],
+]
 parsers = map(first, parsers_names)
 parser_names = map(last, parsers_names)
+simdjzon_parser_idx = findfirst(x -> x == "zig simdjzon", parser_names)
 
 # begin
 fileslen = length(json_files)
 parserslen = length(parsers)
-results = Dict(parser => [[] for _ in 1:fileslen] for parser in parsers)
+bench_results = Dict(parser => [[] for _ in 1:fileslen] for parser in parsers)
 
 function bench(parser, json_file, i, j; dry_run=false, debug=false)
     out = Pipe()
@@ -39,11 +36,10 @@ function bench(parser, json_file, i, j; dry_run=false, debug=false)
     debug && println("$(parser) $json_file exitcode $(proc.exitcode) stdout $output")
     if !dry_run
         @assert(proc.exitcode == 0, "parse validation failure")
-        push!(results[parser][i], parse(Float16, output))
+        push!(bench_results[parser][i], parse(Float16, output))
     end
 end
 
-    
 # dry run to warm up cache
 for parser in parsers, json_file in json_files
     bench(parser, json_file, 1, 1; dry_run=true)
@@ -56,15 +52,26 @@ for j in 1:num_runs, (i, json_file) in enumerate(json_files)
     end
 end
 
-# average the results
+# average the results and 
+# append simdjzon results to csv file
 _mn = [[] for _ in parsers]
 parser_idx = 1
-for parser in parsers
-    parser_results = results[parser]
-    for result_set in parser_results
-        push!(_mn[parser_idx], sum(result_set) / length(result_set))
+open("benchmark_results.csv"; append=true) do results_file
+    write(results_file, join(["Date", json_names...], ", "), "\n")
+    now = Dates.now()
+    write(results_file, Dates.format(now, "Y-m-d"), ", ")
+    for parser in parsers
+        parser_results = bench_results[parser]
+        for result_set in parser_results
+            avg = sum(result_set) / length(result_set)
+            if parser_idx == simdjzon_parser_idx
+                write(results_file, "$avg, ")
+            end
+            push!(_mn[parser_idx], avg)
+        end
+        global parser_idx += 1
     end
-    global parser_idx += 1
+    write(results_file, "\n")
 end
 
 # prepare for plotting
@@ -75,7 +82,6 @@ json_names_lens = map(x -> json_names[x] * " ($(json_file_sizes_kb[x])Kb)", 1:le
 nam = repeat(json_names_lens, inner=lenp)
 sx = repeat(parser_names, outer=lenf)
 
-
 # reshape, flipping rows/cols
 dim1 = length(_mn)
 dim2 = length(_mn[1])
@@ -84,6 +90,8 @@ for i in 1:dim1, j in 1:dim2
     matrix[i,j] = _mn[i][j]
 end
 mn = collect(Iterators.flatten(reshape(matrix, dim2, dim1)))
+
+# plot
 l = @layout [a{0.01h}; grid(1, 1)]
 p = fill(plot(), 2, 1)
 p[1] = plot(title="JSON Validation Times", framestyle=nothing, showaxis=false, xticks=false, yticks=false, margin=0Plots.mm)
@@ -109,4 +117,3 @@ if false
     end
     savefig("validation_line.png")
 end
-# end
