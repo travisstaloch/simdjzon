@@ -1,4 +1,6 @@
 const std = @import("std");
+const build_options = @import("build_options");
+
 const testing = std.testing;
 const mem = std.mem;
 const os = std.os;
@@ -9,6 +11,15 @@ usingnamespace @import("c_intrinsics.zig");
 const StringParsing = @import("StringParsing.zig");
 const NumberParsing = @import("NumberParsing.zig");
 const AtomParsing = @import("AtomParsing.zig");
+
+const DEFAULT_MAX_DEPTH = 1024;
+const step_size = build_options.step_size;
+comptime {
+    assert(step_size == 64 or step_size == 128);
+}
+const u8xstep_size = std.meta.Vector(step_size, u8);
+const STREAMING = false;
+const SIMDJSON_PADDING = 32;
 
 // pub const log_level: std.log.Level = .debug;
 pub const log_level: std.log.Level = .err;
@@ -52,8 +63,6 @@ const Document = struct {
         // a document with only zero-length strings... could have capacity/3 string
         // and we would need capacity/3 * 5 bytes on the string buffer
         document.string_buf_cap = ROUNDUP_N(5 * capacity / 3 + SIMDJSON_PADDING, 64);
-        //   string_buf.reset( new (std::nothrow) uint8_t[string_capacity]);
-        //   tape.reset(new (std::nothrow) uint64_t[tape_capacity]);
         errdefer {
             allocator.free(document.string_buf);
             document.tape.deinit(allocator);
@@ -345,7 +354,8 @@ const Utf8Checker = struct {
     }
 
     inline fn check_next_input(checker: *Utf8Checker, input: u8x64) void {
-        const NUM_CHUNKS = STEP_SIZE / 32;
+        // const NUM_CHUNKS = step_size / 32;
+        const NUM_CHUNKS = 2;
         const chunks = @bitCast([NUM_CHUNKS][32]u8, input);
         if (is_ascii(input)) {
             checker.err |= checker.prev_incomplete;
@@ -356,12 +366,15 @@ const Utf8Checker = struct {
             if (NUM_CHUNKS == 2) {
                 checker.check_utf8_bytes(chunks[0], checker.prev_input_block);
                 checker.check_utf8_bytes(chunks[1], chunks[0]);
-            } else if (NUM_CHUNKS == 4) {
-                checker.check_utf8_bytes(chunks[0], checker.prev_input_block);
-                checker.check_utf8_bytes(chunks[1], chunks[0]);
-                checker.check_utf8_bytes(chunk[2], chunks[1]);
-                checker.check_utf8_bytes(chunk[3], chunk[2]);
-            } else unreachable;
+            }
+            // TODO: NUM_CHUNKS = 4
+            // else if (NUM_CHUNKS == 4) {
+            //     checker.check_utf8_bytes(chunks[0], checker.prev_input_block);
+            //     checker.check_utf8_bytes(chunks[1], chunks[0]);
+            //     checker.check_utf8_bytes(chunks[2], chunks[1]);
+            //     checker.check_utf8_bytes(chunks[3], chunks[2]);
+            // }
+            else unreachable;
             checker.prev_incomplete = is_incomplete(chunks[NUM_CHUNKS - 1]);
             checker.prev_input_block = chunks[NUM_CHUNKS - 1];
         }
@@ -445,7 +458,7 @@ const CharacterBlock = struct {
         // hope that useless computations will be omitted. This is namely case when
         // minifying (we only need whitespace).
 
-        const in = @bitCast([STEP_SIZE]u8, input_vec);
+        const in = @bitCast([64]u8, input_vec);
         const chunk0: u8x32 = in[0..32].*;
         const chunk1: u8x32 = in[32..64].*;
         const wss: [2]u8x32 = .{
@@ -538,20 +551,17 @@ const StructuralIndexer = struct {
         };
     }
 
-    fn step(si: *StructuralIndexer, read_buf: [64]u8, parser: *Parser, reader_pos: u64) !void {
-        if (STEP_SIZE == 64) {
+    fn step(si: *StructuralIndexer, read_buf: [step_size]u8, parser: *Parser, reader_pos: u64) !void {
+        if (step_size == 64) {
             const block_1 = nextBlock(parser, read_buf);
             // println("{b:0>64} | characters.op", .{@bitReverse(u64, block_1.characters.op)});
             try si.next(read_buf, block_1, reader_pos);
             // std.log.debug("stream pos {}", .{try stream.getPos()});
         } else {
-            return error.NotImplemented;
-            //   simd::simd8x64<uint8_t> in_2(block+64);
-            //   json_block block_1 = scanner.next(in_1);
-            //   json_block block_2 = scanner.next(in_2);
-            //   this->next(in_1, block_1, reader.block_index());
-            //   this->next(in_2, block_2, reader.block_index()+64);
-            //   reader.advance();
+            const block_1 = nextBlock(parser, read_buf[0..64].*);
+            const block_2 = nextBlock(parser, read_buf[64..128].*);
+            try si.next(read_buf[0..64].*, block_1, reader_pos);
+            try si.next(read_buf[64..128].*, block_2, reader_pos + 64);
         }
     }
 
@@ -635,7 +645,7 @@ const StructuralIndexer = struct {
         const chunks = @bitCast([2]u8x32, input_vec);
         const unescaped = lteq(u8, chunks, 0x1F);
         if (debug) {
-            var input: [64]u8 = undefined;
+            var input: [step_size]u8 = undefined;
             std.mem.copy(u8, &input, &@as([64]u8, input_vec));
             for (input) |*c| {
                 if (c.* == '\n') c.* = '-';
@@ -1282,11 +1292,6 @@ pub const TapeBuilder = struct {
     }
 };
 
-const DEFAULT_MAX_DEPTH = 1024;
-const STEP_SIZE = 64;
-const STREAMING = false;
-const SIMDJSON_PADDING = 32;
-
 pub const Parser = struct {
     filename: []const u8,
     allocator: *mem.Allocator,
@@ -1444,12 +1449,12 @@ pub const Parser = struct {
 
     fn stage1(parser: *Parser) !void {
         const end_pos = parser.input_len;
-        const end_pos_minus_step = if (end_pos > STEP_SIZE) end_pos - STEP_SIZE else 0;
+        const end_pos_minus_step = if (end_pos > step_size) end_pos - step_size else 0;
 
         var pos: u32 = 0;
-        while (pos < end_pos_minus_step) : (pos += STEP_SIZE) {
+        while (pos < end_pos_minus_step) : (pos += step_size) {
             // println("i {} pos {}", .{ i, pos });
-            const read_buf = parser.bytes[pos..][0..STEP_SIZE];
+            const read_buf = parser.bytes[pos..][0..step_size];
             try parser.indexer.step(read_buf.*, parser, pos);
             // for (blocks) |block| {
             //     println("{b:0>64} | characters.whitespace", .{@bitReverse(u64, block.characters.whitespace)});
@@ -1457,11 +1462,11 @@ pub const Parser = struct {
             //     println("{b:0>64} | in_string", .{@bitReverse(u64, block.strings.in_string)});
             // }
         }
-        var read_buf = [1]u8{0x20} ** STEP_SIZE;
+        var read_buf = [1]u8{0x20} ** step_size;
         std.mem.copy(u8, &read_buf, parser.bytes[pos..end_pos]);
         // std.log.debug("read_buf {d}", .{read_buf});
         try parser.indexer.step(read_buf, parser, pos);
-        try parser.indexer.finish(parser, pos + 64, end_pos, STREAMING);
+        try parser.indexer.finish(parser, pos + step_size, end_pos, STREAMING);
     }
 
     fn stage2(parser: *Parser) !void {
@@ -1657,10 +1662,10 @@ const TapeRef = struct {
         return tr.tape_ref_type() == tt;
     }
     pub inline fn tape_ref_type(tr: TapeRef) TapeType {
-        return TapeType.from_u64(tr.current_raw());
+        return TapeType.from_u64(tr.current());
     }
     pub inline fn value(tr: TapeRef) u64 {
-        return TapeType.extract_value(tr.current_raw());
+        return TapeType.extract_value(tr.current());
     }
     pub inline fn next_value(tr: TapeRef) u64 {
         return TapeType.extract_value(tr.doc.tape.items[tr.idx + 1]);
@@ -1673,16 +1678,16 @@ const TapeRef = struct {
         };
     }
     pub inline fn matching_brace_idx(tr: TapeRef) u32 {
-        const result = @truncate(u32, tr.current_raw());
+        const result = @truncate(u32, tr.current());
         // std.log.debug("TapeRef matching_brace_idx() for {} {}", .{ tr.tape_ref_type(), result });
         return result;
     }
-    pub inline fn current_raw(tr: TapeRef) u64 {
+    pub inline fn current(tr: TapeRef) u64 {
         // std.log.debug("TapeRef current() idx {} len {}", .{ tr.idx, tr.doc.tape.items.len });
         return tr.doc.tape.items[tr.idx];
     }
     pub inline fn scope_count(tr: TapeRef) u32 {
-        return @truncate(u32, (tr.current_raw() >> 32) & TapeType.count_mask);
+        return @truncate(u32, (tr.current() >> 32) & TapeType.count_mask);
     }
 
     pub fn get_string_length(tr: TapeRef) u32 {
@@ -1696,7 +1701,7 @@ const TapeRef = struct {
 
     pub fn get_as_type(tr: TapeRef, comptime T: type) T {
         comptime assert(@sizeOf(T) == @sizeOf(u64));
-        return @bitCast(T, tr.current_raw());
+        return @bitCast(T, tr.current());
     }
 
     pub fn get_next_as_type(tr: TapeRef, comptime T: type) T {

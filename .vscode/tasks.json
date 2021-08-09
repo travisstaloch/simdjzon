@@ -10,6 +10,7 @@
                 // "build", "run", "--", "test.json"
                 // "test", "src/main.zig", "--test-filter", "tape"
                 "build",
+                "-Dstep-size=128"
             ],
             "problemMatcher": [],
             "group": {
@@ -27,6 +28,7 @@
                 // "test", "src/main.zig", "--test-filter", "tape"
                 "build",
                 "test",
+                "-Dstep-size=128"
             ],
             "problemMatcher": [],
             "group": {
