@@ -25,7 +25,7 @@ fn print_vec(name: []const u8, vec: anytype) void {
     println("{s}: {any}", .{ name, @as([@sizeOf(@TypeOf(vec))]u8, vec) });
 }
 
-inline fn SIMDJSON_ROUNDUP_N(a: anytype, n: @TypeOf(a)) @TypeOf(a) {
+inline fn ROUNDUP_N(a: anytype, n: @TypeOf(a)) @TypeOf(a) {
     return (a + (n - 1)) & ~(n - 1);
 }
 const Document = struct {
@@ -48,10 +48,10 @@ const Document = struct {
         // worse with "[7,7,7,7,6,7,7,7,6,7,7,6,[7,7,7,7,6,7,7,7,6,7,7,6,7,7,7,7,7,7,6"
         //where capacity + 1 tape elements are
         // generated, see issue https://github.com/simdjson/simdjson/issues/345
-        const tape_capacity = SIMDJSON_ROUNDUP_N(capacity + 3, 64);
+        const tape_capacity = ROUNDUP_N(capacity + 3, 64);
         // a document with only zero-length strings... could have capacity/3 string
         // and we would need capacity/3 * 5 bytes on the string buffer
-        document.string_buf_cap = SIMDJSON_ROUNDUP_N(5 * capacity / 3 + SIMDJSON_PADDING, 64);
+        document.string_buf_cap = ROUNDUP_N(5 * capacity / 3 + SIMDJSON_PADDING, 64);
         //   string_buf.reset( new (std::nothrow) uint8_t[string_capacity]);
         //   tape.reset(new (std::nothrow) uint64_t[tape_capacity]);
         errdefer {
@@ -943,7 +943,7 @@ pub const Iterator = struct {
         // std.log.debug("scope_end iter.depth {}", .{iter.depth});
         iter.depth -= 1;
         if (iter.depth == 0) return .document_end;
-        const is_array = iter.current_container().is_array;
+        const is_array = iter.parser.open_containers.items(.is_array)[iter.depth];
         if (is_array)
             return .array_continue;
 
@@ -1029,13 +1029,13 @@ pub const Iterator = struct {
         }
     }
 
-    inline fn current_container(iter: *Iterator) *OpenContainerInfo {
+    inline fn current_container(iter: *Iterator) *OpenContainer {
         // std.log.debug("current_container iter.parser.open_containers.len {} iter.depth {}", .{ iter.parser.open_containers.items.len, iter.depth });
-        return &iter.parser.open_containers.items[iter.depth];
+        return &iter.parser.open_containers.items(.open_container)[iter.depth];
     }
     inline fn increment_count(iter: *Iterator) void {
         // we have a key value pair in the object at parser.dom_parser.depth - 1
-        iter.current_container().open_container.count += 1;
+        iter.current_container().count += 1;
     }
 };
 
@@ -1126,7 +1126,7 @@ pub const TapeBuilder = struct {
 
     pub inline fn start_container(
         tb: TapeBuilder,
-        open_containers: *std.ArrayListUnmanaged(OpenContainerInfo),
+        open_containers: *std.MultiArrayList(OpenContainerInfo),
         is_array: bool,
         count: u32,
     ) void {
@@ -1143,7 +1143,7 @@ pub const TapeBuilder = struct {
 
     pub inline fn end_container(tb: *TapeBuilder, iter: *Iterator, start: TapeType, end: TapeType) void {
         // Write the ending tape element, pointing at the start location
-        const container = iter.parser.open_containers.items[iter.depth].open_container;
+        const container = iter.parser.open_containers.items(.open_container)[iter.depth];
         defer iter.parser.open_containers.shrinkRetainingCapacity(iter.depth);
         const start_tape_index = container.tape_index;
         tb.append(start_tape_index, end);
@@ -1296,8 +1296,7 @@ pub const Parser = struct {
     next_structural_index: u32 = 0,
     doc: Document,
     indexer: StructuralIndexer,
-    // TODO: soa
-    open_containers: std.ArrayListUnmanaged(OpenContainerInfo),
+    open_containers: std.MultiArrayList(OpenContainerInfo),
     max_depth: u16,
     n_structural_indexes: u32 = 0,
     bytes: []u8 = &[_]u8{},
@@ -1313,13 +1312,13 @@ pub const Parser = struct {
             .allocator = allocator,
             .doc = Document.init(),
             .indexer = try StructuralIndexer.init(),
-            .open_containers = std.ArrayListUnmanaged(OpenContainerInfo){},
+            .open_containers = std.MultiArrayList(OpenContainerInfo){},
             .max_depth = options.max_depth,
         };
         parser.input_len = try parser.read_file(filename);
         const capacity = parser.input_len;
         try parser.doc.allocate(allocator, capacity);
-        const max_structures = SIMDJSON_ROUNDUP_N(capacity, 64) + 2 + 7;
+        const max_structures = ROUNDUP_N(capacity, 64) + 2 + 7;
         try parser.indexer.bit_indexer.tail.ensureTotalCapacity(allocator, max_structures);
         try parser.open_containers.ensureTotalCapacity(allocator, options.max_depth);
         return parser;
@@ -1334,12 +1333,12 @@ pub const Parser = struct {
             .doc = Document.init(),
             .indexer = try StructuralIndexer.init(),
             .bytes = &[_]u8{},
-            .open_containers = std.ArrayListUnmanaged(OpenContainerInfo){}, // std.MultiArrayList(OpenContainerInfo){},
+            .open_containers = std.MultiArrayList(OpenContainerInfo){},
             .max_depth = options.max_depth,
         };
         parser.input_len = try std.math.cast(u32, input.len);
         const capacity = parser.input_len;
-        const max_structures = SIMDJSON_ROUNDUP_N(capacity, 64) + 2 + 7;
+        const max_structures = ROUNDUP_N(capacity, 64) + 2 + 7;
         const paddedlen = try std.math.add(u32, capacity, SIMDJSON_PADDING);
         parser.bytes = try parser.allocator.alloc(u8, paddedlen);
         mem.copy(u8, parser.bytes, input);
