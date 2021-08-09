@@ -1472,9 +1472,7 @@ pub const Parser = struct {
     }
 
     pub fn parse(parser: *Parser) !void {
-        if (parser.stage1()) |_| {} else |err| switch (err) {
-            else => return err,
-        }
+        try parser.stage1();
         return parser.stage2();
     }
 

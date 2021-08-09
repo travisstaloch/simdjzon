@@ -1,5 +1,10 @@
 # simdjzon
-An port of [simdjson](https://github.com/simdjson/simdjson) to [zig](https://ziglang.org/)
+This is a port of [simdjson](https://github.com/simdjson/simdjson), a high performance JSON parser developed by Daniel Lemire and Geoff Langdale to [zig](https://ziglang.org/).  
+
+# requirements
+A CPU with both AVX2 and CLMUL is required (Haswell from 2013 onwards should do for Intel, for AMD a Ryzen/EPYC CPU (Q1 2017) should be sufficient).
+
+No fallback for unsupported CPUs is provided.
 
 # usage
 ```console
@@ -90,6 +95,10 @@ $ echo $?
 0
 
 ```
+
+### timed against simdjson, go, nim, zig std lib
+Validation times for several large json files.  Created with [benchmark_and_plot.jl](bench/benchmark_and_plot.jl)
+![results](https://github.com/travisstaloch/simdjson-zig/blob/media/bench/validation_grouped.png)
 
 # JSONTestSuite
 
