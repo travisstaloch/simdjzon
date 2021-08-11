@@ -1794,7 +1794,6 @@ pub fn parse_integer(src: [*]const u8) !u64 {
     // Optimization note: the compiler can probably merge
     // ((digit_count == 0) || (digit_count > longest_digit_count))
     // into a single  branch since digit_count is unsigned.
-    std.debug.print("digit_count {}\n", .{digit_count});
     if ((digit_count == 0) or (digit_count > longest_digit_count)) {
         return error.INCORRECT_TYPE;
     }

@@ -22,35 +22,43 @@ pub const Value = struct {
         return Object.start(&v.iter);
     }
     fn start_or_resume_object(v: *Value) !Object {
-        if (v.iter.at_start()) {
-            return try v.get_object();
-        } else {
-            return Object.resume_(&v.iter);
-        }
+        return if (v.iter.at_start())
+            try v.get_object()
+        else
+            Object.resume_(&v.iter);
     }
-    pub fn get(v: *Value, comptime T: type) !T {
-        return v.iter.get(T);
+    pub fn get_int(v: *Value, comptime T: type) !T {
+        return v.iter.get_int(T);
     }
 };
 
 pub const ObjectIterator = struct {
     iter: ValueIterator,
     fn init(iter: ValueIterator) ObjectIterator {
-        return .{ .iter = iter };
+        return ObjectIterator{ .iter = iter };
     }
-    pub fn next(oi: *ObjectIterator) ?Field {
-        if (!oi.iter.is_open()) return null;
-        oi.iter.skip_child() catch return null;
-        _ = oi.iter.has_next_field() catch return null;
-        return Field{
-            .key = oi.iter.field_key(),
-            .value = oi.iter.field_value(),
-        };
+    pub fn next(oi: *ObjectIterator, key_buf: []u8) !?ObjectIterator {
+        var has_value = false;
+        errdefer oi.iter.abandon();
+        if (oi.iter.at_first_field()) {
+            has_value = true;
+        } else if (!oi.iter.is_open()) {
+            has_value = false;
+        } else {
+            try oi.iter.skip_child();
+            has_value = try oi.iter.has_next_field();
+        }
+        if (has_value) {
+            ValueIterator.copy_key_without_quotes(key_buf, try oi.iter.field_key(key_buf.len), key_buf.len);
+            try oi.iter.field_value();
+            return ObjectIterator{ .iter = oi.iter.child() };
+        }
+        return null;
     }
 };
 pub const Object = struct {
     iter: ValueIterator,
-    pub fn iterator(o: *Object) ObjectIterator {
+    pub fn iterator(o: Object) ObjectIterator {
         return ObjectIterator.init(o.iter);
     }
     fn start_root(iter: *ValueIterator) !Object {
@@ -81,13 +89,30 @@ const TokenIterator = struct {
     src: std.io.StreamSource,
     buf: [mem.page_size]u8 = undefined,
     buf_len: u16 = 0,
+    buf_start_pos: u32,
     index: [*]const u32,
 
-    pub fn peek_delta(ti: *TokenIterator, delta: i32) ![*]const u8 {
-        return ti.peek(if (delta < 0) ti.index - @intCast(u32, -delta) else ti.index + @intCast(u32, delta));
+    pub fn peek_delta(ti: *TokenIterator, delta: i32, len: u16) ![*]const u8 {
+        return ti.peek(
+            if (delta < 0)
+                ti.index - @intCast(u32, -delta)
+            else
+                ti.index + @intCast(u32, delta),
+            len,
+        );
     }
-    pub fn peek(ti: *TokenIterator, position: [*]const u32) ![*]const u8 {
-        try ti.src.seekTo(position[0]);
+
+    /// position: pointer to a src position
+    /// len: requested length to be read from src, starting at position
+    pub fn peek(ti: *TokenIterator, position: [*]const u32, len: u16) ![*]const u8 {
+        const start = position[0];
+        const end = start + std.math.min(len, ti.buf_len);
+        // println("start {} end {} ti.buf_start_pos {} ti.buf_len {} len {}", .{ start, end, ti.buf_start_pos, ti.buf_len, len });
+        if (ti.buf_start_pos <= start and end < ti.buf_start_pos + len)
+            return @ptrCast([*]const u8, &ti.buf) + (start - ti.buf_start_pos);
+
+        try ti.src.seekTo(start);
+        ti.buf_start_pos = start;
         ti.buf_len = @truncate(u16, try ti.src.read(&ti.buf));
         return &ti.buf;
     }
@@ -96,13 +121,13 @@ pub const Iterator = struct {
     token: TokenIterator,
     parser: *Parser,
     string_buf_loc: [*]const u8,
-    err: Error,
+    err: Error!void = {},
     depth: u32,
     log: Logger = .{ .depth = 0 },
 
     pub fn init(parser: *Parser, src: std.io.StreamSource) Iterator {
         return .{
-            .token = .{ .src = src, .index = parser.structural_indices().ptr },
+            .token = .{ .src = src, .index = parser.structural_indices().ptr, .buf_start_pos = 0 },
             .parser = parser,
             .err = undefined,
             .string_buf_loc = parser.parser.doc.string_buf.ptr,
@@ -110,16 +135,16 @@ pub const Iterator = struct {
         };
     }
 
-    pub fn advance(iter: *Iterator) ![*]const u8 {
+    pub fn advance(iter: *Iterator, len: u16) ![*]const u8 {
         defer iter.token.index += 1;
-        // std.debug.print("advance '{s}'\n", .{(try iter.token.peek(iter.token.index))[0..5]});
-        return iter.token.peek(iter.token.index);
+        // print("advance '{s}'\n", .{(try iter.token.peek(iter.token.index, len))[0..len]});
+        return iter.token.peek(iter.token.index, len);
     }
-    pub fn peek(iter: *Iterator, index: [*]const u32) ![*]const u8 {
-        return iter.token.peek(index);
+    pub fn peek(iter: *Iterator, index: [*]const u32, len: u16) ![*]const u8 {
+        return iter.token.peek(index, len);
     }
-    pub fn peek_delta(iter: *Iterator, delta: i32) ![*]const u8 {
-        return iter.token.peek_delta(delta);
+    pub fn peek_delta(iter: *Iterator, delta: i32, len: u16) ![*]const u8 {
+        return iter.token.peek_delta(delta, len);
     }
     pub fn last_document_position(iter: Iterator) [*]const u32 {
         // The following line fails under some compilers...
@@ -133,7 +158,7 @@ pub const Iterator = struct {
     }
 
     pub fn peek_last(iter: *Iterator) ![*]const u8 {
-        return iter.token.peek(iter.last_document_position());
+        return iter.token.peek(iter.last_document_position(), 1);
     }
     pub fn root_checkpoint(iter: Iterator) [*]const u32 {
         return iter.parser.structural_indices().ptr;
@@ -141,10 +166,9 @@ pub const Iterator = struct {
 
     }
     pub fn skip_child(iter: *Iterator, parent_depth: u32) !void {
-        std.debug.print("iter.depth {} parent_depth {}\n", .{ iter.depth, parent_depth });
         if (iter.depth <= parent_depth) return;
 
-        switch ((try iter.advance())[0]) {
+        switch ((try iter.advance(1))[0]) {
             // TODO consider whether matching braces is a requirement: if non-matching braces indicates
             // *missing* braces, then future lookups are not in the object/arrays they think they are,
             // violating the rule "validate enough structure that the user can be confident they are
@@ -179,7 +203,7 @@ pub const Iterator = struct {
         // const end = @ptrToInt(iter.parser.structural_indices().ptr + iter.parser.parser.n_structural_indexes);
         const end_idx = iter.parser.structural_indices()[iter.parser.parser.n_structural_indexes];
         while (iter.token.index[0] <= end_idx) {
-            switch ((try iter.advance())[0]) {
+            switch ((try iter.advance(1))[0]) {
                 '[', '{' => {
                     iter.log.start_value(iter, "skip");
                     iter.depth += 1;
@@ -272,8 +296,8 @@ const ValueIterator = struct {
     fn is_at_start(vi: ValueIterator) bool {
         return vi.iter.token.index == vi.start_position;
     }
-    fn peek_start(vi: *ValueIterator) ![*]const u8 {
-        return try vi.iter.peek(vi.start_position);
+    fn peek_start(vi: *ValueIterator, len: u16) ![*]const u8 {
+        return try vi.iter.peek(vi.start_position, len);
     }
     fn assert_at_start(vi: ValueIterator) void {
         assert(vi.iter.token.index == vi.start_position);
@@ -294,14 +318,13 @@ const ValueIterator = struct {
         assert(vi.depth == parent_depth + 1);
         vi.depth = parent_depth;
     }
-    fn advance_non_root_scalar(vi: *ValueIterator, typ: []const u8) ![*]const u8 {
+    fn advance_non_root_scalar(vi: *ValueIterator, typ: []const u8, peek_len: u16) ![*]const u8 {
         vi.iter.log.value2(&vi.iter, typ, "", vi.start_position[0], vi.depth);
         if (!vi.is_at_start())
-            return vi.peek_start();
+            return vi.peek_start(peek_len);
 
         vi.assert_at_non_root_start();
-        const result = try vi.iter.advance();
-        std.debug.print("result {s}\n", .{result[0..5]});
+        const result = try vi.iter.advance(peek_len);
         vi.ascend_to(vi.depth - 1);
         return result;
     }
@@ -319,7 +342,7 @@ const ValueIterator = struct {
     fn has_next_field(vi: *ValueIterator) !bool {
         vi.assert_at_next();
 
-        switch ((try vi.iter.advance())[0]) {
+        switch ((try vi.iter.advance(1))[0]) {
             '}' => {
                 vi.iter.log.end_value(&vi.iter, "object");
                 vi.iter.ascend_to(vi.depth - 1);
@@ -336,7 +359,7 @@ const ValueIterator = struct {
             return vi.iter.report_error(error.TAPE_ERROR, "object invalid: { at beginning of document unmatched by } at end of document");
         return result;
     }
-    fn advance_container_start(vi: *ValueIterator, typ: []const u8) ![*]const u8 {
+    fn advance_container_start(vi: *ValueIterator, typ: []const u8, peek_len: u16) ![*]const u8 {
         _ = typ;
         vi.iter.log.line_fmt(&vi.iter, "", typ, "start pos {} depth {}", .{ vi.start_position[0], vi.depth });
 
@@ -345,12 +368,12 @@ const ValueIterator = struct {
             // #ifdef SIMDJSON_DEVELOPMENT_CHECKS
             //     if (!vi.is_at_iterator_start()) { return OUT_OF_ORDER_ITERATION; }
             // #endif
-            return vi.peek_start();
+            return vi.peek_start(peek_len);
         }
 
         // Get the JSON and advance the cursor, decreasing depth to signify that we have retrieved the value.
         vi.assert_at_start();
-        return try vi.iter.advance();
+        return try vi.iter.advance(peek_len);
     }
     fn incorrect_type_error(vi: *ValueIterator, message: []const u8) Error {
         _ = message;
@@ -371,9 +394,9 @@ const ValueIterator = struct {
 
     fn started_object(vi: *ValueIterator) !bool {
         vi.assert_at_container_start();
-        if ((try vi.iter.peek_delta(0))[0] == '}') {
+        if ((try vi.iter.peek_delta(0, 1))[0] == '}') {
             vi.iter.log.value(&vi.iter, "empty object");
-            _ = try vi.iter.advance();
+            _ = try vi.iter.advance(0);
             vi.iter.ascend_to(vi.depth - 1);
             return false;
         }
@@ -385,22 +408,24 @@ const ValueIterator = struct {
     }
 
     fn start_object(vi: *ValueIterator) !bool {
-        var json: [*]const u8 = try vi.advance_container_start("object");
+        var json: [*]const u8 = try vi.advance_container_start("object", 1);
         if (json[0] != '{')
             return vi.incorrect_type_error("Not an object");
         return vi.started_object();
     }
 
-    fn field_key(vi: *ValueIterator) ![*]const u8 {
+    fn field_key(vi: *ValueIterator, key_len: usize) ![*]const u8 {
         vi.assert_at_next();
-        var key = try vi.iter.advance();
-        if (key[0] != '"') return vi.iter.report_error(error.TAPE_ERROR, "Object key is not a string");
+        var key = try vi.iter.advance(try std.math.cast(u16, key_len));
+        if (key[0] != '"')
+            return vi.iter.report_error(error.TAPE_ERROR, "Object key is not a string");
         return key;
     }
     fn field_value(vi: *ValueIterator) !void {
         vi.assert_at_next();
 
-        if ((try vi.iter.advance())[0] != ':') return vi.iter.report_error(error.TAPE_ERROR, "Missing colon in object field");
+        if ((try vi.iter.advance(1))[0] != ':')
+            return vi.iter.report_error(error.TAPE_ERROR, "Missing colon in object field");
         vi.iter.descend_to(vi.depth + 1);
     }
     pub fn find_field(vi: ValueIterator, key: []const u8) Value {
@@ -418,13 +443,19 @@ const ValueIterator = struct {
     fn abandon(vi: *ValueIterator) void {
         vi.iter.abandon();
     }
-    fn copy_key_with_quotes(key_buf: []u8, key: [*]const u8, key_len: usize) void {
-        mem.copy(u8, key_buf, key[0 .. key_len + 2]);
+    pub fn copy_key_with_quotes(key_buf: []u8, key: [*]const u8, key_len: usize) void {
+        mem.copy(u8, key_buf, key[0..std.math.min(key_len + 2, key_buf.len)]);
         // return key_buf[0 .. key_len + 2];
     }
+    fn copy_key_without_quotes(key_buf: []u8, key: [*]const u8, key_len: usize) void {
+        mem.copy(u8, key_buf, key[1..std.math.min(key_len, key_buf.len)]);
+        // const end = string_parsing.parse_string(key + 1, key_buf.ptr);
+        // const len = try ptr_diff(u8, end.?, key_buf.ptr);
+        // return key_buf[0..len];
+    }
     fn find_field_raw(vi: *ValueIterator, key: []const u8) !bool {
-        println("find_field_raw vi.depth {} vi.iter.depth {}", .{ vi.depth, vi.iter.depth });
-        var has_value: bool = undefined;
+        // println("find_field_raw vi.depth {} vi.iter.depth {}", .{ vi.depth, vi.iter.depth });
+        var has_value = false;
         // TODO add build option for this key buffer length
         var key_buf: [1024]u8 = undefined;
         errdefer vi.abandon();
@@ -486,7 +517,7 @@ const ValueIterator = struct {
             // Get the key and colon, stopping at the value.
 
             if (key.len + 2 > key_buf.len) return error.STRING_ERROR;
-            copy_key_with_quotes(&key_buf, try vi.field_key(), key.len);
+            copy_key_with_quotes(&key_buf, try vi.field_key(try std.math.cast(u16, key.len)), key.len);
 
             println("actual_key '{s}'", .{key_buf[0..key.len]});
 
@@ -672,8 +703,11 @@ const ValueIterator = struct {
         return ValueIterator.init(vi.iter, vi.depth + 1, vi.iter.token.index);
     }
 
-    pub fn get(vi: *ValueIterator, comptime T: type) !T {
-        return std.math.cast(T, try number_parsing.parse_integer(try vi.advance_non_root_scalar("int64")));
+    pub fn get_int(vi: *ValueIterator, comptime T: type) !T {
+        const peek_len = comptime try std.math.cast(u16, std.math.log10(@as(usize, std.math.maxInt(T))));
+        return std.math.cast(T, try number_parsing.parse_integer(
+            try vi.advance_non_root_scalar(@typeName(T), peek_len),
+        ));
     }
 };
 

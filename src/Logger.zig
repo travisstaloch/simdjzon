@@ -46,7 +46,7 @@ pub fn start(log: *Logger, iter: anytype) void {
 }
 
 fn printable_char(c: u8) u8 {
-    return if (c >= 0x20) c else ' ';
+    return if (c >= 0x20 and c < 128) c else ' ';
 }
 
 pub fn line_fmt(log: *Logger, iter: anytype, title_prefix: []const u8, title: []const u8, comptime detail_fmt: []const u8, detail_args: anytype) void {
@@ -71,8 +71,9 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
     const content = blk: {
         if (current_index) |ci| {
             if (is_ondemand) {
-                const ptr = iter.peek(ci) catch unreachable;
-                mem.copy(u8, &log_buf2, ptr[0..std.math.min(iter.token.buf_len, log_buf2.len)]);
+                const len = std.math.min(iter.token.buf_len, log_buf2.len);
+                const ptr = iter.peek(ci, len) catch unreachable;
+                mem.copy(u8, &log_buf2, ptr[0..len]);
             }
 
             for (log_buf2) |*c, i| {
@@ -89,8 +90,9 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
     print("| {s} ", .{content});
     const next_content = blk: {
         if (is_ondemand) {
-            const ptr = iter.peek(next_index) catch unreachable;
-            mem.copy(u8, &log_buf2, ptr[0..std.math.min(iter.token.buf_len, log_buf2.len)]);
+            const len = std.math.min(iter.token.buf_len, log_buf2.len);
+            const ptr = iter.peek(next_index, len) catch unreachable;
+            mem.copy(u8, &log_buf2, ptr[0..len]);
         }
 
         const end_pos = if (!is_ondemand) iter.parser.bytes.len else iter.parser.end_pos;

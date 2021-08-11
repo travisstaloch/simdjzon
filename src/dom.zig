@@ -819,14 +819,6 @@ pub const Iterator = struct {
         unreachable;
     }
 
-    inline fn ptr_diff(comptime T: type, p1: anytype, p2: anytype) !T {
-        const U = std.meta.Child(@TypeOf(p1));
-        const V = std.meta.Child(@TypeOf(p2));
-        if (@sizeOf(U) != @sizeOf(V)) @compileError("ptr_diff: mismatched child sizes");
-        const diff = @ptrToInt(p1) - @ptrToInt(p2);
-        return std.math.cast(T, diff / (@sizeOf(U)));
-    }
-
     inline fn document_end(iter: *Iterator, visitor: *TapeBuilder) Error!void {
         iter.log.end_value(iter, "document");
         try visitor.visit_document_end();

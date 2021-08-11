@@ -319,7 +319,7 @@ test "ondemand" {
     try test_ondemand();
 }
 
-const E = Error || error{TestExpectedEqual};
+const E = Error || error{ TestExpectedEqual, TestUnexpectedResult };
 fn test_ondemand_doc(input: []const u8, expected: fn (doc: *ondemand.Document) E!void) !void {
     var src = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(input) };
     var parser = try ondemand.Parser.init(&src, allr, "<fba>", .{});
@@ -329,23 +329,35 @@ fn test_ondemand_doc(input: []const u8, expected: fn (doc: *ondemand.Document) E
 }
 
 fn test_ondemand() !void {
-    // var obj = try doc.get_object();
-    // if (false) {
-    //     // TODO
-    //     var objit = obj.iterator();
-    //     while (objit.next()) |field| {
-    //         if (mem.eql(u8, field.key, "key"))
-    //             testing.expectEqual(@as(u64, 1), field.value());
-    //     }
-    // }
     try test_ondemand_doc(
         \\ {"x": 1, "y": 2, "z": {"a": 33}}
     , struct {
         fn func(doc: *ondemand.Document) E!void {
             //
-            try testing.expectEqual(@as(u64, 2), try (try doc.find_field("y")).get(u64));
-            try testing.expectEqual(@as(u64, 1), try (try doc.find_field("x")).get(u64));
-            try testing.expectEqual(@as(u8, 33), try (try (try doc.find_field("z")).find_field("a")).get(u8));
+            try testing.expectEqual(@as(u64, 2), try (try doc.find_field("y")).get_int(u64));
+            try testing.expectEqual(@as(u64, 1), try (try doc.find_field("x")).get_int(u64));
+            try testing.expectEqual(@as(u8, 33), try (try (try doc.find_field("z")).find_field("a")).get_int(u8));
+        }
+    }.func);
+
+    try test_ondemand_doc(
+        \\ {"x": 1, "y": 2}
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            var obj = try doc.get_object();
+            var objit = obj.iterator();
+            var buf: [10]u8 = undefined;
+
+            var f1 = try objit.next(&buf);
+            try testing.expect(f1 != null);
+            try testing.expectEqualStrings("x", buf[0..1]);
+            try testing.expectEqual(@as(u64, 1), try f1.?.iter.get_int(u64));
+
+            var f2 = try objit.next(&buf);
+            try testing.expectEqualStrings("y", buf[0..1]);
+            try testing.expectEqual(@as(u64, 2), try f2.?.iter.get_int(u64));
+
+            try testing.expect((try objit.next(&buf)) == null);
         }
     }.func);
 }

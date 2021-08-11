@@ -26,6 +26,14 @@ pub inline fn ROUNDUP_N(a: anytype, n: @TypeOf(a)) @TypeOf(a) {
     return (a + (n - 1)) & ~(n - 1);
 }
 
+pub inline fn ptr_diff(comptime T: type, p1: anytype, p2: anytype) !T {
+    const U = std.meta.Child(@TypeOf(p1));
+    const V = std.meta.Child(@TypeOf(p2));
+    if (@sizeOf(U) != @sizeOf(V)) @compileError("ptr_diff: mismatched child sizes");
+    const diff = @ptrToInt(p1) - @ptrToInt(p2);
+    return std.math.cast(T, diff / (@sizeOf(U)));
+}
+
 pub const FileError = std.fs.File.OpenError || std.fs.File.ReadError || std.fs.File.SeekError;
 pub const Error = std.mem.Allocator.Error || std.os.WriteError || FileError || error{ EndOfStream, Overflow } || JsonError;
 pub const JsonError = error{
