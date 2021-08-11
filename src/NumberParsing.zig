@@ -1704,3 +1704,121 @@ pub const power_of_five_128 = [_]u64{
     0xe3d8f9e563a198e5, 0x58180fddd97723a6,
     0x8e679c2f5e44ff8f, 0x570f09eaa7ea7648,
 };
+
+const integer_string_finisher = [256]Error!void{
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, {},
+    {},                 error.NUMBER_ERROR,   error.NUMBER_ERROR, {},                 error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   {},                 error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, {},
+    error.NUMBER_ERROR, error.INCORRECT_TYPE, error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, {},                 error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.INCORRECT_TYPE,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, {},                   error.NUMBER_ERROR, {},                 error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.INCORRECT_TYPE, error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, {},                 error.NUMBER_ERROR,
+    {},                 error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR, error.NUMBER_ERROR,   error.NUMBER_ERROR, error.NUMBER_ERROR, error.NUMBER_ERROR,
+    error.NUMBER_ERROR,
+};
+// Parse any number from  -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
+pub fn parse_integer(src: [*]const u8) !u64 {
+    //
+    // Check for minus sign
+    //
+    const negative = (src[0] == '-');
+    var p = src + @boolToInt(negative);
+
+    //
+    // Parse the integer part.
+    //
+    // PERF NOTE: we don't use is_made_of_eight_digits_fast because large integers like 123456789 are rare
+    const start_digits = p;
+    var i: u64 = 0;
+    while (parse_digit(u64, p[0], &i)) : (p += 1) {}
+
+    // If there were no digits, or if the integer starts with 0 and has more than one digit, it's an error.
+    // Optimization note: size_t is expected to be unsigned.
+    var digit_count = @ptrToInt(p) - @ptrToInt(start_digits);
+    // The longest negative 64-bit number is 19 digits.
+    // The longest positive 64-bit number is 20 digits.
+    // We do it this way so we don't trigger this branch unless we must.
+    const longest_digit_count: u64 = if (negative) 19 else 20;
+    // Optimization note: the compiler can probably merge
+    // ((digit_count == 0) || (digit_count > longest_digit_count))
+    // into a single  branch since digit_count is unsigned.
+    std.debug.print("digit_count {}\n", .{digit_count});
+    if ((digit_count == 0) or (digit_count > longest_digit_count)) {
+        return error.INCORRECT_TYPE;
+    }
+    // Here digit_count > 0.
+    if (('0' == start_digits[0]) and (digit_count > 1)) {
+        return error.NUMBER_ERROR;
+    }
+    // We can do the following...
+    // if (!jsoncharutils::is_structural_or_whitespace(*p)) {
+    //  return (*p == '.' || *p == 'e' || *p == 'E') ? INCORRECT_TYPE : NUMBER_ERROR;
+    // }
+    // as a single table lookup:
+    if (integer_string_finisher[p[0]]) {} else |err| return err;
+    if (digit_count == longest_digit_count) {
+        if (negative) {
+            // Anything negative above INT64_MAX+1 is invalid
+            if (i > std.math.maxInt(i64) + 1) return error.INCORRECT_TYPE;
+            return ~i + 1;
+
+            // Positive overflow check:
+            // - A 20 digit number starting with 2-9 is overflow, because 18,446,744,073,709,551,615 is the
+            //   biggest uint64_t.
+            // - A 20 digit number starting with 1 is overflow if it is less than INT64_MAX.
+            //   If we got here, it's a 20 digit number starting with the digit "1".
+            // - If a 20 digit number starting with 1 overflowed (i*10+digit), the result will be smaller
+            //   than 1,553,255,926,290,448,384.
+            // - That is smaller than the smallest possible 20-digit number the user could write:
+            //   10,000,000,000,000,000,000.
+            // - Therefore, if the number is positive and lower than that, it's overflow.
+            // - The value we are looking at is less than or equal to 9,223,372,036,854,775,808 (INT64_MAX).
+            //
+        } else if (src[0] != '1' or i <= std.math.maxInt(i64)) return error.INCORRECT_TYPE;
+    }
+
+    return if (negative) (~i + 1) else i;
+}
