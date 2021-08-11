@@ -20,25 +20,28 @@ echo $? # 0 on success
 ```
 
 ```zig
-test "read into a struct" {
-    const S = struct { a: u8, b: u8 };
+const dom = @import("dom.zig");
+
+test "get with struct" {
+    const S = struct { a: u8, b: u8, c: struct { d: u8 } };
     const input =
-        \\{"a": 42, "b": 84}
+        \\{"a": 42, "b": 84, "c": {"d": 126}}
     ;
-    var parser = try Parser.initFixedBuffer(allr, input, .{});
+    var parser = try dom.Parser.initFixedBuffer(allr, input, .{});
     defer parser.deinit();
     try parser.parse();
     var s: S = undefined;
     try parser.element().get(&s);
     try testing.expectEqual(@as(u8, 42), s.a);
     try testing.expectEqual(@as(u8, 84), s.b);
+    try testing.expectEqual(@as(u8, 126), s.c.d);
 }
 
 test "at_pointer" {
     const input =
         \\{"a": {"b": [1,2,3]}}
     ;
-    var parser = try Parser.initFixedBuffer(allr, input, .{});
+    var parser = try dom.Parser.initFixedBuffer(allr, input, .{});
     defer parser.deinit();
     try parser.parse();
     const b0 = try parser.element().at_pointer("/a/b/0");

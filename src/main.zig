@@ -280,10 +280,15 @@ test "get with slice/array" {
     try testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4 }, &s);
 }
 
+// ------------
+// README tests
+// ------------
+
+// const dom = @import("dom.zig");
 test "get with struct" {
-    const S = struct { a: u8, b: u8 };
+    const S = struct { a: u8, b: u8, c: struct { d: u8 } };
     const input =
-        \\{"a": 42, "b": 84}
+        \\{"a": 42, "b": 84, "c": {"d": 126}}
     ;
     var parser = try dom.Parser.initFixedBuffer(allr, input, .{});
     defer parser.deinit();
@@ -292,7 +297,23 @@ test "get with struct" {
     try parser.element().get(&s);
     try testing.expectEqual(@as(u8, 42), s.a);
     try testing.expectEqual(@as(u8, 84), s.b);
+    try testing.expectEqual(@as(u8, 126), s.c.d);
 }
+
+test "at_pointer" {
+    const input =
+        \\{"a": {"b": [1,2,3]}}
+    ;
+    var parser = try dom.Parser.initFixedBuffer(allr, input, .{});
+    defer parser.deinit();
+    try parser.parse();
+    const b0 = try parser.element().at_pointer("/a/b/0");
+    try testing.expectEqual(@as(i64, 1), try b0.get_int64());
+}
+
+// ------------
+// end README tests
+// ------------
 
 test "ondemand" {
     try test_ondemand();
