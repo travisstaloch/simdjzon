@@ -6,9 +6,10 @@ const main = @import("main.zig");
 const Error = main.Error;
 const println = main.println;
 const CharUtils = @import("StringParsing.zig").CharUtils;
-const Iterator = main.Iterator;
-const TapeBuilder = main.TapeBuilder;
-const TapeType = main.TapeType;
+const dom = @import("dom.zig");
+const Iterator = dom.Iterator;
+const TapeBuilder = dom.TapeBuilder;
+const TapeType = dom.TapeType;
 
 fn INVALID_NUMBER(src: [*]const u8) Error {
     _ = src;
@@ -16,15 +17,15 @@ fn INVALID_NUMBER(src: [*]const u8) Error {
 }
 
 fn WRITE_DOUBLE(VALUE: f64, _: [*]const u8, WRITER: *TapeBuilder) void {
-     (WRITER).append_double( VALUE);
+    (WRITER).append_double(VALUE);
 }
 
 fn WRITE_INTEGER(VALUE: u64, _: [*]const u8, WRITER: *TapeBuilder) void {
-     (WRITER).append_i64( VALUE);
+    (WRITER).append_i64(VALUE);
 }
 
 fn WRITE_UNSIGNED(VALUE: u64, _: [*]const u8, WRITER: *TapeBuilder) void {
-     (WRITER).append_u64(VALUE);
+    (WRITER).append_u64(VALUE);
 }
 
 pub fn parse_number(
@@ -235,7 +236,7 @@ fn significant_digits(start_digits: [*]const u8, digit_count: usize) usize {
 fn slow_float_parsing(src: [*]const u8, writer: *TapeBuilder) !void {
     var d: f64 = undefined;
     if (parse_float_fallback(src, &d)) {
-        writer.append_double( d);
+        writer.append_double(d);
         return;
     }
     return INVALID_NUMBER(src);
@@ -724,7 +725,15 @@ fn parse_float_fallback(ptr: [*]const u8, outDouble: *f64) bool {
     return !(outDouble.* > std.math.f64_max or outDouble.* < -std.math.f64_max);
 }
 
-fn write_float(src: [*]const u8, negative: bool, i: u64, start_digits: [*]const u8, digit_count: usize, exponent: i64, writer: *TapeBuilder, ) !void {
+fn write_float(
+    src: [*]const u8,
+    negative: bool,
+    i: u64,
+    start_digits: [*]const u8,
+    digit_count: usize,
+    exponent: i64,
+    writer: *TapeBuilder,
+) !void {
     // If we frequently had to deal with long strings of digits,
     // we could extend our code by using a 128-bit integer instead
     // of a 64-bit integer. However, this is uncommon in practice.
@@ -760,7 +769,7 @@ fn write_float(src: [*]const u8, negative: bool, i: u64, start_digits: [*]const 
         if (smallest_power > -342) @compileError("smallest_power is not small enough");
         //
         if (exponent < smallest_power or i == 0) {
-             WRITE_DOUBLE(0, src, writer);
+            WRITE_DOUBLE(0, src, writer);
             return;
         } else { // (exponent > largest_power) and (i != 0)
             // We have, for sure, an infinite value and simdjson refuses to parse infinite values.

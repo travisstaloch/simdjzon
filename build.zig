@@ -26,7 +26,7 @@ pub fn build(b: *std.build.Builder) void {
 
     var main_tests = b.addTest("src/main.zig");
     setup(main_tests, mode, target, step_size);
-    // main_tests.setFilter("search tape");
+    // main_tests.setFilter("ondemand");
 
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&main_tests.step);
