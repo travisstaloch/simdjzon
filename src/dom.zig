@@ -6,9 +6,9 @@ const assert = std.debug.assert;
 usingnamespace @import("vector_types.zig");
 usingnamespace @import("llvm_intrinsics.zig");
 usingnamespace @import("c_intrinsics.zig");
-const StringParsing = @import("StringParsing.zig");
-const NumberParsing = @import("NumberParsing.zig");
-const AtomParsing = @import("AtomParsing.zig");
+const string_parsing = @import("string_parsing.zig");
+const number_parsing = @import("number_parsing.zig");
+const atom_parsing = @import("atom_parsing.zig");
 const Logger = @import("Logger.zig");
 usingnamespace @import("common.zig");
 
@@ -1020,24 +1020,24 @@ pub const TapeBuilder = struct {
 
     inline fn visit_number(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log.value(iter, "number");
-        try NumberParsing.parse_number(value, tb);
+        try number_parsing.parse_number(value, tb);
     }
     inline fn visit_true_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log.value(iter, "true");
         assert(value[0] == 't');
-        if (!AtomParsing.is_valid_true_atom(value + 1)) return error.T_ATOM_ERROR;
+        if (!atom_parsing.is_valid_true_atom(value + 1)) return error.T_ATOM_ERROR;
         tb.append(0, TapeType.TRUE);
     }
     inline fn visit_false_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log.value(iter, "false");
         assert(value[0] == 'f');
-        if (!AtomParsing.is_valid_false_atom(value + 1)) return error.T_ATOM_ERROR;
+        if (!atom_parsing.is_valid_false_atom(value + 1)) return error.T_ATOM_ERROR;
         tb.append(0, TapeType.FALSE);
     }
     inline fn visit_null_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log.value(iter, "null");
         assert(value[0] == 'n');
-        if (!AtomParsing.is_valid_null_atom(value + 1)) return error.T_ATOM_ERROR;
+        if (!atom_parsing.is_valid_null_atom(value + 1)) return error.T_ATOM_ERROR;
         tb.append(0, TapeType.NULL);
     }
 
@@ -1058,7 +1058,7 @@ pub const TapeBuilder = struct {
     inline fn visit_string(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8, key: bool) Error!void {
         iter.log.value(iter, if (key) "key" else "string");
         var dst = try tb.on_start_string(iter);
-        dst = StringParsing.parse_string(value + 1, dst) orelse {
+        dst = string_parsing.parse_string(value + 1, dst) orelse {
             iter.log.err(iter, "Invalid escape in string");
             return error.STRING_ERROR;
         };

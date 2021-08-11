@@ -5,7 +5,7 @@ usingnamespace @import("llvm_intrinsics.zig");
 const main = @import("main.zig");
 const Error = main.Error;
 const println = main.println;
-const CharUtils = @import("StringParsing.zig").CharUtils;
+const CharUtils = @import("string_parsing.zig").CharUtils;
 const dom = @import("dom.zig");
 const Iterator = dom.Iterator;
 const TapeBuilder = dom.TapeBuilder;

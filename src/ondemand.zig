@@ -6,9 +6,9 @@ const assert = std.debug.assert;
 usingnamespace @import("common.zig");
 const dom = @import("dom.zig");
 const Logger = @import("Logger.zig");
-const NumberParsing = @import("NumberParsing.zig");
-const StringParsing = @import("StringParsing.zig");
-const CharUtils = StringParsing.CharUtils;
+const number_parsing = @import("number_parsing.zig");
+const string_parsing = @import("string_parsing.zig");
+const CharUtils = string_parsing.CharUtils;
 
 pub const Value = struct {
     iter: ValueIterator,
@@ -263,7 +263,7 @@ const ValueIterator = struct {
     //     return doc.resume_value_iterator().at_key(key);
     // }
     fn parse_null(json: [*]const u8) bool {
-        return !AtomParsing.is_valid_atom(json, 4, AtomParsing.atom_null) and CharUtils.is_structural_or_whitespace(json[4]);
+        return !atom_parsing.is_valid_atom(json, 4, atom_parsing.atom_null) and CharUtils.is_structural_or_whitespace(json[4]);
     }
 
     pub fn is_null(vi: *ValueIterator) !bool {
@@ -673,7 +673,7 @@ const ValueIterator = struct {
     }
 
     pub fn get(vi: *ValueIterator, comptime T: type) !T {
-        return std.math.cast(T, try NumberParsing.parse_integer(try vi.advance_non_root_scalar("int64")));
+        return std.math.cast(T, try number_parsing.parse_integer(try vi.advance_non_root_scalar("int64")));
     }
 };
 
