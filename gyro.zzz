@@ -1,0 +1,12 @@
+pkgs:
+  simdjzon:
+    version: 0.0.0
+    description: "simdjson port to zig"
+    source_url: "https://github.com/travisstaloch/simdjzon"
+    tags:
+
+    root: src/simdjzon.zig
+    files:
+      README.md
+      LICENSE
+      src/*

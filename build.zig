@@ -24,7 +24,7 @@ pub fn build(b: *std.build.Builder) void {
     setup(lib, mode, target, step_size);
     lib.install();
 
-    var main_tests = b.addTest("src/main.zig");
+    var main_tests = b.addTest("src/tests.zig");
     setup(main_tests, mode, target, step_size);
     // main_tests.setFilter("ondemand");
 

@@ -1,3 +1,6 @@
 **/zig-cache
 **/zig-out
 bench/bin*
+gyro.lock
+.gyro/*
+deps.zig

@@ -24,3 +24,5 @@ jobs:
         version: master
 
     - run: zig build test
+    - run: zig build test -Dstep-size=128
+    - run: zig build
