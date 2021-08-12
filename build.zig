@@ -20,7 +20,7 @@ pub fn build(b: *std.build.Builder) void {
         "how many bytes of input to read at per StructuralIndexer step.  must be either 64 or 128",
     ) orelse 64;
 
-    const lib = b.addStaticLibrary("simdjzon", "src/main.zig");
+    const lib = b.addStaticLibrary("simdjzon", "src/simdjzon.zig");
     setup(lib, mode, target, step_size);
     lib.install();
 

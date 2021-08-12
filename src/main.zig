@@ -313,7 +313,7 @@ fn test_ondemand_doc(input: []const u8, expected: fn (doc: *ondemand.Document) E
     var src = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(input) };
     var parser = try ondemand.Parser.init(&src, allr, "<fba>", .{});
     defer parser.deinit();
-    var doc = try parser.iterate(src);
+    var doc = try parser.iterate();
     try expected(&doc);
 }
 

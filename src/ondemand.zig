@@ -49,7 +49,7 @@ pub const Value = struct {
 };
 
 pub const Field = struct {
-    key: [*]const u8,
+    key: [*]const u8, // TODO: make this a []const u8
     value: Value,
 };
 
@@ -986,11 +986,10 @@ pub const Parser = struct {
         try p.parser.indexer.finish(&p.parser, pos + step_size, pos + bytes_read, STREAMING);
     }
 
-    pub fn iterate(p: *Parser, src: std.io.StreamSource) !Document {
-        // Run stage 1.
+    pub fn iterate(p: *Parser) !Document {
         try p.stage1();
         return Document{
-            .iter = Iterator.init(p, src),
+            .iter = Iterator.init(p, p.src.*),
         };
     }
 
