@@ -189,6 +189,9 @@ const TokenIterator = struct {
         ti.buf_len = @truncate(u16, try ti.src.read(&ti.buf));
         return &ti.buf;
     }
+    pub fn peek_length(_: *TokenIterator, position: [*]const u32) u32 {
+        return (position + 1)[0] - position[0];
+    }
 };
 pub const Iterator = struct {
     token: TokenIterator,
@@ -215,6 +218,9 @@ pub const Iterator = struct {
     }
     pub fn peek_delta(iter: *Iterator, delta: i32, len: u16) ![*]const u8 {
         return iter.token.peek_delta(delta, len);
+    }
+    pub fn peek_length(iter: *Iterator, position: [*]const u32) u32 {
+        return iter.token.peek_length(position);
     }
     pub fn last_document_position(iter: Iterator) [*]const u32 {
         // The following line fails under some compilers...
@@ -344,6 +350,21 @@ pub const Iterator = struct {
     pub fn string_buf_loc(iter: Iterator) [*]const u8 {
         return @ptrCast([*]const u8, &iter.token.buf) + iter.token.index[0] - iter.token.buf_start_pos;
     }
+
+    fn copy_to_buffer(json: [*]const u8, max_len_: u32, comptime N: u16, tmpbuf: *[N]u8) bool {
+        // Truncate whitespace to fit the buffer.
+        var max_len = max_len_;
+        if (max_len > N - 1) {
+            if (CharUtils.is_not_structural_or_whitespace(json[N - 1])) return false;
+            max_len = N - 1;
+        }
+
+        // Copy to the buffer.
+        //   std::memcpy(tmpbuf, json, max_len);
+        @memcpy(tmpbuf, json, max_len);
+        tmpbuf[max_len] = ' ';
+        return true;
+    }
 };
 const ValueIterator = struct {
     iter: Iterator, // this needs to be a value, not a pointer
@@ -386,6 +407,10 @@ const ValueIterator = struct {
         assert(vi.iter.depth == vi.depth);
         assert(vi.depth > 0);
     }
+    fn assert_at_root(vi: ValueIterator) void {
+        vi.assert_at_start();
+        assert(vi.depth == 1);
+    }
     fn assert_at_child(vi: ValueIterator) void {
         assert(@ptrToInt(vi.iter.token.index) > @ptrToInt(vi.start_position));
         assert(vi.iter.depth == vi.depth + 1);
@@ -409,6 +434,14 @@ const ValueIterator = struct {
         const result = try vi.iter.advance(peek_len);
         vi.ascend_to(vi.depth - 1);
         return result;
+    }
+    fn advance_root_scalar(vi: *ValueIterator, typ: []const u8, peek_len: u16) ![*]const u8 {
+        vi.iter.log.value2(&vi.iter, typ, "", vi.start_position[0], vi.depth);
+        if (!vi.is_at_start())
+            return vi.peek_start(peek_len);
+        vi.assert_at_root();
+        defer vi.iter.ascend_to(vi.depth - 1);
+        return vi.iter.advance(peek_len);
     }
 
     fn is_open(vi: ValueIterator) bool {
@@ -878,6 +911,48 @@ const ValueIterator = struct {
     pub fn get_bool(vi: *ValueIterator) !bool {
         return vi.parse_bool(try vi.advance_non_root_scalar("bool", 5));
     }
+    fn peek_start_length(vi: *ValueIterator) u32 {
+        return vi.iter.peek_length(vi.start_position);
+    }
+    pub fn get_root_int(vi: *ValueIterator, comptime T: type) !T {
+        const max_len = vi.peek_start_length();
+        const json = try vi.advance_root_scalar("int64", try std.math.cast(u16, max_len));
+        var tmpbuf: [20 + 1]u8 = undefined; // -<19 digits> is the longest possible integer
+        if (!Iterator.copy_to_buffer(json, max_len, tmpbuf.len, &tmpbuf)) {
+            vi.iter.log.err_fmt(&vi.iter, "Root number more than 20 characters. start_position {} depth {}", .{ vi.start_position[0], vi.depth });
+            return error.NUMBER_ERROR;
+        }
+        return std.math.cast(T, try number_parsing.parse_integer(&tmpbuf));
+    }
+    pub fn get_root_double(vi: *ValueIterator) !f64 {
+        const max_len = vi.peek_start_length();
+        const N = 1074 + 8 + 1;
+        const json = try vi.advance_root_scalar("double", N);
+        // Per https://www.exploringbinary.com/maximum-number-of-decimal-digits-in-binary-floating-point-numbers/, 1074 is the maximum number of significant fractional digits. Add 8 more digits for the biggest number: -0.<fraction>e-308.
+        var tmpbuf: [N]u8 = undefined;
+        if (!Iterator.copy_to_buffer(json, max_len, N, &tmpbuf)) {
+            vi.iter.log.err_fmt(&vi.iter, "Root number more than 1082 characters. start_position {} depth {}", .{ vi.start_position[0], vi.depth });
+            return error.NUMBER_ERROR;
+        }
+        return number_parsing.parse_double(&tmpbuf);
+    }
+    pub fn get_root_string(vi: *ValueIterator, dest: []u8) ![]const u8 {
+        return vi.get_string(dest);
+    }
+    pub fn get_root_bool(vi: *ValueIterator) !bool {
+        const max_len = vi.peek_start_length();
+        const json = try vi.advance_root_scalar("bool", 5);
+        var tmpbuf: [5 + 1]u8 = undefined;
+        if (!Iterator.copy_to_buffer(json, max_len, tmpbuf.len, &tmpbuf))
+            return vi.incorrect_type_error("Not a boolean");
+        return vi.parse_bool(&tmpbuf);
+    }
+    pub fn is_root_null(vi: *ValueIterator) !bool {
+        const max_len = vi.peek_start_length();
+        const json = try vi.advance_root_scalar("null", 4);
+        return max_len >= 4 and !atom_parsing.is_valid_atom(json[0..4], 4, atom_parsing.atom_null) or
+            (max_len == 4 or CharUtils.is_structural_or_whitespace(json[5]));
+    }
 };
 
 fn unsafe_is_equal(a: [*]const u8, target: []const u8) bool {
@@ -929,6 +1004,22 @@ pub const Document = struct {
 
     pub fn find_field_unordered(doc: *Document, key: []const u8) !Value {
         return doc.resume_value().find_field_unordered(key);
+    }
+
+    pub fn get_int(doc: *Document, comptime T: type) !T {
+        return doc.get_root_value_iterator().get_root_int(T);
+    }
+    pub fn get_string(doc: *Document, buf: []u8) ![]const u8 {
+        return doc.get_root_value_iterator().get_root_string(buf);
+    }
+    pub fn get_double(doc: *Document) !f64 {
+        return doc.get_root_value_iterator().get_root_double();
+    }
+    pub fn get_bool(doc: *Document) !bool {
+        return doc.get_root_value_iterator().get_root_bool();
+    }
+    pub fn is_null(doc: *Document) !bool {
+        return doc.get_root_value_iterator().is_root_null();
     }
 };
 

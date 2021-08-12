@@ -397,3 +397,49 @@ test "ondemand array iteration nested" {
         }
     }.func);
 }
+
+test "ondemand root types" {
+    try test_ondemand_doc(
+        \\1
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            try testing.expectEqual(@as(u8, 1), try doc.get_int(u8));
+        }
+    }.func);
+    try test_ondemand_doc(
+        \\1.0
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            try testing.expectApproxEqAbs(@as(f64, 1.0), try doc.get_double(), std.math.f64_epsilon);
+        }
+    }.func);
+    try test_ondemand_doc(
+        \\"string"
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            var buf: [6]u8 = undefined;
+            try testing.expectEqualStrings("string", try doc.get_string(&buf));
+        }
+    }.func);
+    try test_ondemand_doc(
+        \\true
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            try testing.expectEqual(true, try doc.get_bool());
+        }
+    }.func);
+    try test_ondemand_doc(
+        \\false
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            try testing.expectEqual(false, try doc.get_bool());
+        }
+    }.func);
+    try test_ondemand_doc(
+        \\null
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            try testing.expect(try doc.is_null());
+        }
+    }.func);
+}
