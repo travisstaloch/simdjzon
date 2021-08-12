@@ -335,14 +335,16 @@ pub fn test_ondemand() !void {
             var obj = try doc.get_object();
             var objit = obj.iterator();
             var buf: [10]u8 = undefined;
-
-            var f1 = (try objit.next(&buf)) orelse return testing.expect(false);
-            try testing.expectEqualStrings("x", buf[0..1]);
-            try testing.expectEqual(@as(u64, 1), try f1.get_int(u64));
-
-            var f2 = (try objit.next(&buf)) orelse return testing.expect(false);
-            try testing.expectEqualStrings("y", buf[0..1]);
-            try testing.expectEqual(@as(u64, 2), try f2.get_int(u64));
+            {
+                var f = (try objit.next(&buf)) orelse return testing.expect(false);
+                try testing.expectEqualStrings("x", buf[0..1]);
+                try testing.expectEqual(@as(u64, 1), try f.value.get_int(u64));
+            }
+            {
+                var f = (try objit.next(&buf)) orelse return testing.expect(false);
+                try testing.expectEqualStrings("y", buf[0..1]);
+                try testing.expectEqual(@as(u64, 2), try f.value.get_int(u64));
+            }
 
             try testing.expect((try objit.next(&buf)) == null);
         }
@@ -358,32 +360,32 @@ pub fn test_ondemand() !void {
             {
                 var f = (try objit.next(&buf)) orelse return testing.expect(false);
                 try testing.expectEqualStrings("str", buf[0..3]);
-                try testing.expectEqualStrings("strval", try f.iter.get_string(&buf));
+                try testing.expectEqualStrings("strval", try f.value.get_string(&buf));
             }
             {
                 var f = (try objit.next(&buf)) orelse return testing.expect(false);
                 try testing.expectEqualStrings("f", buf[0..1]);
-                try testing.expectApproxEqAbs(@as(f64, 1.23), try f.iter.get_double(), std.math.f64_epsilon);
+                try testing.expectApproxEqAbs(@as(f64, 1.23), try f.value.get_double(), std.math.f64_epsilon);
             }
             {
                 var f = (try objit.next(&buf)) orelse return testing.expect(false);
                 try testing.expectEqualStrings("t", buf[0..1]);
-                try testing.expectEqual(true, try f.iter.get_bool());
+                try testing.expectEqual(true, try f.value.get_bool());
             }
             {
                 var f = (try objit.next(&buf)) orelse return testing.expect(false);
                 try testing.expectEqualStrings("not", buf[0..3]);
-                try testing.expectEqual(false, try f.iter.get_bool());
+                try testing.expectEqual(false, try f.value.get_bool());
             }
             {
                 var f = (try objit.next(&buf)) orelse return testing.expect(false);
                 try testing.expectEqualStrings("n", buf[0..1]);
-                try testing.expectEqual(false, try f.iter.is_null());
+                try testing.expectEqual(false, try f.value.is_null());
             }
             {
                 var f = (try objit.next(&buf)) orelse return testing.expect(false);
                 try testing.expectEqualStrings("neg", buf[0..3]);
-                try testing.expectEqual(@as(i8, -42), try f.iter.get_int(i8));
+                try testing.expectEqual(@as(i8, -42), try f.value.get_int(i8));
             }
 
             try testing.expect((try objit.next(&buf)) == null);
@@ -396,7 +398,6 @@ pub fn test_ondemand() !void {
         fn func(doc: *ondemand.Document) E!void {
             var arr = try doc.get_array();
             var arrit = arr.iterator();
-
             {
                 var e = (try arrit.next()) orelse return testing.expect(false);
                 try testing.expectEqual(@as(u64, 1), try e.get_int(u64));
@@ -404,6 +405,34 @@ pub fn test_ondemand() !void {
             {
                 var e = (try arrit.next()) orelse return testing.expect(false);
                 try testing.expectEqual(@as(u64, 2), try e.get_int(u64));
+            }
+
+            try testing.expect((try arrit.next()) == null);
+        }
+    }.func);
+
+    try test_ondemand_doc(
+        \\[
+        \\  { "xs": [ 1.0, 2.0, 3.0, 4.0 ] },
+        \\  { "xs": [ 1.0, 2.0, 3.0, 4.0 ] },
+        \\  { "xs": [ 1.0, 2.0, 3.0, 4.0 ] }
+        \\]
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            var arr = try doc.get_array();
+            var arrit = arr.iterator();
+
+            while (try arrit.next()) |*e| {
+                var obj = try e.get_object();
+                var xs = try obj.find_field("xs");
+                var arr2 = try xs.get_array();
+                var it = arr2.iterator();
+                var i: u8 = 0;
+                while (try it.next()) |*e2| {
+                    _ = try e2.get_double();
+                    i += 1;
+                }
+                try testing.expectEqual(@as(u8, 4), i);
             }
 
             try testing.expect((try arrit.next()) == null);

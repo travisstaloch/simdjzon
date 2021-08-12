@@ -22,6 +22,9 @@ pub const Value = struct {
     pub fn get_object(v: *Value) !Object {
         return Object.start(&v.iter);
     }
+    pub fn get_array(v: *Value) !Array {
+        return Array.start(&v.iter);
+    }
     fn start_or_resume_object(v: *Value) !Object {
         return if (v.iter.at_start())
             try v.get_object()
@@ -31,6 +34,23 @@ pub const Value = struct {
     pub fn get_int(v: *Value, comptime T: type) !T {
         return v.iter.get_int(T);
     }
+    pub fn get_string(v: *Value, buf: []u8) ![]const u8 {
+        return v.iter.get_string(buf);
+    }
+    pub fn get_double(v: *Value) !f64 {
+        return v.iter.get_double();
+    }
+    pub fn get_bool(v: *Value) !bool {
+        return v.iter.get_bool();
+    }
+    pub fn is_null(v: *Value) !bool {
+        return v.iter.is_null();
+    }
+};
+
+pub const Field = struct {
+    key: [*]const u8,
+    value: Value,
 };
 
 pub const ObjectIterator = struct {
@@ -40,7 +60,7 @@ pub const ObjectIterator = struct {
     }
     /// if there is a next field, copies the unescaped key into key_buf
     /// and returns a new iterator at the key's value
-    pub fn next(oi: *ObjectIterator, key_buf: []u8) !?ObjectIterator {
+    pub fn next(oi: *ObjectIterator, key_buf: []u8) !?Field {
         errdefer oi.iter.abandon();
         const has_value = if (oi.iter.at_first_field())
             true
@@ -53,7 +73,7 @@ pub const ObjectIterator = struct {
         if (has_value) {
             ValueIterator.copy_key_without_quotes(key_buf, try oi.iter.field_key(key_buf.len), key_buf.len);
             try oi.iter.field_value();
-            return ObjectIterator{ .iter = oi.iter.child() };
+            return Field{ .key = @ptrCast([*]const u8, &key_buf), .value = .{ .iter = oi.iter.child() } };
         }
         return null;
     }
@@ -98,7 +118,7 @@ const ArrayIterator = struct {
         return ArrayIterator{ .iter = iter };
     }
 
-    pub fn next(ai: *ArrayIterator) !?ArrayIterator {
+    pub fn next(ai: *ArrayIterator) !?Value {
         errdefer ai.iter.abandon();
         const has_value = if (ai.iter.at_first_field())
             true
@@ -111,7 +131,8 @@ const ArrayIterator = struct {
         if (has_value) {
             defer ai.iter.skip_child() catch {};
             // std.debug.print("ai.iter.iter.depth {} ai.iter.depth {}\n", .{ ai.iter.iter.depth, ai.iter.depth });
-            return ArrayIterator{ .iter = ai.iter.child() };
+            // return ArrayIterator{ .iter = ai.iter.child() };
+            return Value{ .iter = ai.iter.child() };
         }
         return null;
     }
@@ -163,7 +184,6 @@ const TokenIterator = struct {
         if (ti.buf_start_pos <= start and start < ti.buf_start_pos + ti.buf_len)
             return @ptrCast([*]const u8, &ti.buf) + (start - ti.buf_start_pos);
         // println("TokenIterator: seek and read()", .{});
-        if (start == ti.buf_start_pos + ti.buf_len) return error.CAPACITY;
         try ti.src.seekTo(start);
         ti.buf_start_pos = start;
         ti.buf_len = @truncate(u16, try ti.src.read(&ti.buf));
