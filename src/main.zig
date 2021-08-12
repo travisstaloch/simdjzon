@@ -317,7 +317,7 @@ fn test_ondemand_doc(input: []const u8, expected: fn (doc: *ondemand.Document) E
     try expected(&doc);
 }
 
-fn test_ondemand() !void {
+pub fn test_ondemand() !void {
     try test_ondemand_doc(
         \\ {"x": 1, "y": 2, "z": {"a": 33}}
     , struct {
@@ -390,21 +390,23 @@ fn test_ondemand() !void {
         }
     }.func);
 
-    // try test_ondemand_doc(
-    //     \\ [1,2]
-    // , struct {
-    //     fn func(doc: *ondemand.Document) E!void {
-    //         var arr = try doc.get_array();
-    //         var arrit = arr.iterator();
+    try test_ondemand_doc(
+        \\ [1,2]
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            var arr = try doc.get_array();
+            var arrit = arr.iterator();
 
-    //         var e1 = (try arrit.next(&buf)) orelse return testing.expect(false);
-    //         try testing.expectEqual(@as(u64, 1), try e1.get_int(u64));
+            {
+                var e = (try arrit.next()) orelse return testing.expect(false);
+                try testing.expectEqual(@as(u64, 1), try e.get_int(u64));
+            }
+            {
+                var e = (try arrit.next()) orelse return testing.expect(false);
+                try testing.expectEqual(@as(u64, 2), try e.get_int(u64));
+            }
 
-    //         var e2 = (try arrit.next(&buf)) orelse return testing.expect(false);
-    //         try testing.expectEqualStrings("y", buf[0..1]);
-    //         try testing.expectEqual(@as(u64, 2), try e2.get_int(u64));
-
-    //         try testing.expect((try arrit.next(&buf)) == null);
-    //     }
-    // }.func);
+            try testing.expect((try arrit.next()) == null);
+        }
+    }.func);
 }

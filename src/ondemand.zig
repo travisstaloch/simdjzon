@@ -91,6 +91,48 @@ pub const Object = struct {
         return Value{ .iter = o.iter.child() };
     }
 };
+
+const ArrayIterator = struct {
+    iter: ValueIterator,
+    fn init(iter: ValueIterator) ArrayIterator {
+        return ArrayIterator{ .iter = iter };
+    }
+
+    pub fn next(ai: *ArrayIterator) !?ArrayIterator {
+        errdefer ai.iter.abandon();
+        const has_value = if (ai.iter.at_first_field())
+            true
+        else if (!ai.iter.is_open())
+            false
+        else blk: {
+            try ai.iter.skip_child();
+            break :blk try ai.iter.has_next_element();
+        };
+        if (has_value) {
+            defer ai.iter.skip_child() catch {};
+            // std.debug.print("ai.iter.iter.depth {} ai.iter.depth {}\n", .{ ai.iter.iter.depth, ai.iter.depth });
+            return ArrayIterator{ .iter = ai.iter.child() };
+        }
+        return null;
+    }
+    pub fn get_int(ai: *ArrayIterator, comptime T: type) !T {
+        return ai.iter.get_int(T);
+    }
+};
+const Array = struct {
+    iter: ValueIterator,
+    fn start_root(iter: *ValueIterator) !Array {
+        _ = try iter.start_root_array();
+        return Array{ .iter = iter.* };
+    }
+    fn start(iter: *ValueIterator) !Array {
+        _ = try iter.start_array();
+        return Array{ .iter = iter.* };
+    }
+    pub fn iterator(o: Array) ArrayIterator {
+        return ArrayIterator.init(o.iter);
+    }
+};
 const TokenIterator = struct {
     src: std.io.StreamSource,
     buf: [mem.page_size]u8 = undefined,
@@ -139,7 +181,6 @@ pub const Iterator = struct {
         return .{
             .token = .{ .src = src, .index = parser.structural_indices().ptr, .buf_start_pos = 0 },
             .parser = parser,
-            .err = undefined,
             .depth = 1,
         };
     }
@@ -373,6 +414,23 @@ const ValueIterator = struct {
             else => return vi.iter.report_error(error.TAPE_ERROR, "Missing comma between object fields"),
         }
     }
+
+    fn has_next_element(vi: *ValueIterator) !bool {
+        vi.assert_at_next();
+
+        switch ((try vi.iter.advance(1))[0]) {
+            ']' => {
+                vi.iter.log.end_value(&vi.iter, "array");
+                vi.iter.ascend_to(vi.depth - 1);
+                return false;
+            },
+            ',' => {
+                vi.iter.descend_to(vi.depth + 1);
+                return true;
+            },
+            else => return vi.iter.report_error(error.TAPE_ERROR, "Missing comma between array elements"),
+        }
+    }
     fn start_root_object(vi: *ValueIterator) !bool {
         var result = try vi.start_object();
         const last_char = (try vi.iter.peek_last())[0];
@@ -380,8 +438,14 @@ const ValueIterator = struct {
             return vi.iter.report_error(error.TAPE_ERROR, "object invalid: { at beginning of document unmatched by } at end of document");
         return result;
     }
+    fn start_root_array(vi: *ValueIterator) !bool {
+        var result = try vi.start_array();
+        const last_char = (try vi.iter.peek_last())[0];
+        if (last_char != ']')
+            return vi.iter.report_error(error.TAPE_ERROR, "array invalid: [ at beginning of document unmatched by ] at end of document");
+        return result;
+    }
     fn advance_container_start(vi: *ValueIterator, typ: []const u8, peek_len: u16) ![*]const u8 {
-        _ = typ;
         vi.iter.log.line_fmt(&vi.iter, "", typ, "start pos {} depth {}", .{ vi.start_position[0], vi.depth });
 
         // If we're not at the position anymore, we don't want to advance the cursor.
@@ -394,7 +458,7 @@ const ValueIterator = struct {
 
         // Get the JSON and advance the cursor, decreasing depth to signify that we have retrieved the value.
         vi.assert_at_start();
-        return try vi.iter.advance(peek_len);
+        return vi.iter.advance(peek_len);
     }
     fn incorrect_type_error(vi: *ValueIterator, message: []const u8) Error {
         _ = message;
@@ -428,11 +492,35 @@ const ValueIterator = struct {
         return true;
     }
 
+    fn started_array(vi: *ValueIterator) !bool {
+        vi.assert_at_container_start();
+        if ((try vi.iter.peek_delta(0, 1))[0] == ']') {
+            vi.iter.log.value(&vi.iter, "empty array");
+            _ = try vi.iter.advance(0);
+            vi.iter.ascend_to(vi.depth - 1);
+            return false;
+        }
+        vi.iter.log.start_value(&vi.iter, "array");
+
+        vi.iter.descend_to(vi.depth + 1);
+        // #ifdef SIMDJSON_DEVELOPMENT_CHECKS
+        // _json_iter->set_start_position(_depth, _start_position);
+        // #endif
+        return true;
+    }
+
     fn start_object(vi: *ValueIterator) !bool {
         var json: [*]const u8 = try vi.advance_container_start("object", 1);
         if (json[0] != '{')
             return vi.incorrect_type_error("Not an object");
         return vi.started_object();
+    }
+
+    fn start_array(vi: *ValueIterator) !bool {
+        var json: [*]const u8 = try vi.advance_container_start("array", 1);
+        if (json[0] != '[')
+            return vi.incorrect_type_error("Not an array");
+        return vi.started_array();
     }
 
     fn field_key(vi: *ValueIterator, key_len: usize) ![*]const u8 {
@@ -807,6 +895,10 @@ pub const Document = struct {
     pub fn get_object(doc: *Document) !Object {
         var value = doc.get_root_value_iterator();
         return try Object.start_root(&value);
+    }
+    pub fn get_array(doc: *Document) !Array {
+        var value = doc.get_root_value_iterator();
+        return Array.start_root(&value);
     }
     fn resume_value(doc: *Document) Value {
         return Value{ .iter = doc.resume_value_iterator() };

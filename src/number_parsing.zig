@@ -45,7 +45,7 @@ pub fn parse_number(
 
     while (parse_digit(u64, p[0], &i)) p += 1;
 
-    var digit_count = @ptrToInt(p) - @ptrToInt(start_digits);
+    var digit_count = try common.ptr_diff(u32, p, start_digits);
     // println("parse_digit i {} digit_count {}", .{ i, digit_count });
     if (digit_count == 0 or ('0' == start_digits[0] and digit_count > 1)) {
         return INVALID_NUMBER(src);
@@ -61,7 +61,7 @@ pub fn parse_number(
         p += 1;
         // std.log.debug("calling parse_decimal p[0] {c} i {} ", .{ p[0], i });
         try parse_decimal(src, &p, &i, &exponent);
-        digit_count = @ptrToInt(p) - @ptrToInt(start_digits); // used later to guard against overflows
+        digit_count = try common.ptr_diff(u32, p, start_digits); // used later to guard against overflows
     }
     if ('e' == p[0] or 'E' == p[0]) {
         is_float = true;
@@ -1787,7 +1787,7 @@ pub fn parse_integer(src: [*]const u8) !u64 {
 
     // If there were no digits, or if the integer starts with 0 and has more than one digit, it's an error.
     // Optimization note: size_t is expected to be unsigned.
-    var digit_count = @ptrToInt(p) - @ptrToInt(start_digits);
+    var digit_count = try common.ptr_diff(u32, p, start_digits);
     // The longest negative 64-bit number is 19 digits.
     // The longest positive 64-bit number is 20 digits.
     // We do it this way so we don't trigger this branch unless we must.
@@ -1868,7 +1868,7 @@ pub fn parse_double(src_: [*]const u8) !f64 {
         while (parse_digit(u64, p[0], &i)) {
             p += 1;
         }
-        exponent = - try common.ptr_diff(i64, p, start_decimal_digits);
+        exponent = -try common.ptr_diff(i64, p, start_decimal_digits);
 
         // Overflow check. More than 19 digits (minus the decimal) may be overflow.
         overflow = (try common.ptr_diff(u16, p, src)) - 1 > 19;
@@ -1878,7 +1878,7 @@ pub fn parse_double(src_: [*]const u8) !f64 {
             while (start_digits[0] == '0') {
                 start_digits += 1;
             }
-            overflow = @ptrToInt(start_digits) - @ptrToInt(src) > 19;
+            overflow = (try common.ptr_diff(u32, start_digits, src)) > 19;
         }
     } else {
         overflow = (try common.ptr_diff(u16, p, src)) > 19;
@@ -1901,7 +1901,7 @@ pub fn parse_double(src_: [*]const u8) !f64 {
         const num_exp_digits = try common.ptr_diff(u16, p, start_exp_digits);
         if (num_exp_digits == 0 or num_exp_digits > 19) return error.NUMBER_ERROR;
 
-        exponent += @bitCast(i64, if (exp_neg) 0-%exp else exp);
+        exponent += @bitCast(i64, if (exp_neg) 0 -% exp else exp);
     }
 
     if (CharUtils.is_not_structural_or_whitespace(p[0])) return error.NUMBER_ERROR;

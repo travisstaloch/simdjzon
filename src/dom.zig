@@ -970,14 +970,11 @@ pub const TapeBuilder = struct {
 
     inline fn on_start_string(tb: *TapeBuilder, iter: *Iterator) ![*]u8 {
         // iter.log.line_fmt(iter, "", "start_string", "iter.parser.doc.string_buf.len {}", .{iter.parser.doc.string_buf.len});
-        tb.append(@ptrToInt(tb.current_string_buf_loc) - @ptrToInt(iter.parser.doc.string_buf.ptr), .STRING);
+        tb.append(ptr_diff(u64, tb.current_string_buf_loc, iter.parser.doc.string_buf.ptr) catch unreachable, .STRING);
         return tb.current_string_buf_loc + @sizeOf(u32);
     }
     inline fn on_end_string(tb: *TapeBuilder, iter: *Iterator, dst: [*]u8) !void {
-        const str_len = (try std.math.cast(
-            u32,
-            @ptrToInt(dst - @ptrToInt(tb.current_string_buf_loc + @sizeOf(u32))),
-        ));
+        const str_len = try ptr_diff(u32, dst, tb.current_string_buf_loc + @sizeOf(u32));
         // println("str_len {} str '{s}'", .{ str_len, (tb.current_string_buf_loc + 4)[0..str_len] });
 
         // TODO check for overflow in case someone has a crazy string (>=4GB?)
