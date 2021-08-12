@@ -3,6 +3,10 @@ const std = @import("std");
 
 pub const DEFAULT_MAX_DEPTH = 1024;
 pub const step_size = build_options.step_size;
+comptime {
+    std.debug.assert(step_size == 64 or step_size == 128);
+}
+
 pub const u8xstep_size = std.meta.Vector(step_size, u8);
 pub const STREAMING = false;
 pub const SIMDJSON_PADDING = 32;
