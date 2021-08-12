@@ -254,11 +254,24 @@ test "at_pointer" {
     try testing.expectEqual(@as(i64, 1), try b0.get_int64());
 }
 
+// const ondemand = @import("ondemand.zig");
+test "ondemand at_pointer" {
+    const input =
+        \\{"a": {"b": [1,2,3]}}
+    ;
+    var src = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(input) };
+    var parser = try ondemand.Parser.init(&src, allr, "<fba>", .{});
+    defer parser.deinit();
+    var doc = try parser.iterate();
+    var b0 = try doc.at_pointer("/a/b/0");
+    try testing.expectEqual(@as(u8, 1), try b0.get_int(u8));
+}
+
 // ------------
 // end README tests
 // ------------
 
-const E = Error || error{ TestExpectedEqual, TestUnexpectedResult, TestExpectedApproxEqAbs };
+const E = Error || error{ TestExpectedEqual, TestUnexpectedResult, TestExpectedApproxEqAbs, TestUnexpectedError, TestExpectedError };
 fn test_ondemand_doc(input: []const u8, expected: fn (doc: *ondemand.Document) E!void) !void {
     // std.debug.print("\n0123456789012345678901234567890123456789\n{s}\n", .{input});
     var src = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(input) };
@@ -440,6 +453,34 @@ test "ondemand root types" {
     , struct {
         fn func(doc: *ondemand.Document) E!void {
             try testing.expect(try doc.is_null());
+        }
+    }.func);
+}
+
+test "ondemand atpointer" {
+    try test_ondemand_doc(
+        \\{"a": {"b": 1, "c": [1,2]}}
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            try testing.expectEqual(@as(u8, 1), try (try doc.at_pointer("/a/b")).get_int(u8));
+            try testing.expectEqual(@as(u8, 2), try (try doc.at_pointer("/a/c/1")).get_int(u8));
+            try testing.expectError(error.NO_SUCH_FIELD, doc.at_pointer("/b"));
+        }
+    }.func);
+}
+
+test "ondemand at, array at_pointer" {
+    try test_ondemand_doc(
+        \\[1,2]
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            var arr = try doc.get_array();
+            try testing.expectEqual(@as(u8, 1), try (try arr.at(0)).?.get_int(u8));
+            try testing.expectEqual(@as(u8, 2), try (try arr.at(1)).?.get_int(u8));
+            try testing.expectEqual(@as(?ondemand.Value, null), try arr.at(2));
+            try testing.expectEqual(@as(u8, 1), try (try arr.at_pointer("/0")).get_int(u8));
+            try testing.expectEqual(@as(u8, 2), try (try arr.at_pointer("/1")).get_int(u8));
+            try testing.expectError(error.INVALID_JSON_POINTER, arr.at_pointer("/2"));
         }
     }.func);
 }

@@ -1300,13 +1300,15 @@ const Array = struct {
     }
 
     pub inline fn at_pointer(arr: Array, _json_pointer: []const u8) Error!Element {
-        if (_json_pointer.len == 0) return Element{ .tape = arr.tape } else if (_json_pointer[0] != '/') return error.INVALID_JSON_POINTER;
+        if (_json_pointer.len == 0)
+            return Element{ .tape = arr.tape }
+        else if (_json_pointer[0] != '/')
+            return error.INVALID_JSON_POINTER;
         var json_pointer = _json_pointer[1..];
         // - means "the append position" or "the element after the end of the array"
         // We don't support this, because we're returning a real element, not a position.
-        if (json_pointer.len == 1 and json_pointer[0] == '-') {
+        if (json_pointer.len == 1 and json_pointer[0] == '-')
             return error.INDEX_OUT_OF_BOUNDS;
-        }
 
         // Read the array index
         var array_index: usize = 0;
@@ -1324,9 +1326,9 @@ const Array = struct {
         } // "JSON pointer array index has other characters after 0"
 
         // Empty string is invalid; so is a "/" with no digits before it
-        if (i == 0) {
+        if (i == 0)
             return error.INVALID_JSON_POINTER;
-        } // "Empty string in JSON pointer array index"
+        // "Empty string in JSON pointer array index"
 
         // Get the child
         var child = arr.at(array_index) orelse return error.INVALID_JSON_POINTER;

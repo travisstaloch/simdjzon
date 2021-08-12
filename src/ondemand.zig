@@ -46,6 +46,14 @@ pub const Value = struct {
     pub fn is_null(v: *Value) !bool {
         return v.iter.is_null();
     }
+
+    pub inline fn at_pointer(v: *Value, json_pointer: []const u8) !Value {
+        return switch (try v.iter.get_type()) {
+            .array => (try v.get_array()).at_pointer(json_pointer),
+            .object => (try v.get_object()).at_pointer(json_pointer),
+            else => error.INVALID_JSON_POINTER,
+        };
+    }
 };
 
 pub const Field = struct {
@@ -110,6 +118,44 @@ pub const Object = struct {
         if (!has_value) return error.NO_SUCH_FIELD;
         return Value{ .iter = o.iter.child() };
     }
+
+    pub fn at_pointer(o: *Object, json_pointer_: []const u8) !Value {
+        if (json_pointer_[0] != '/') return error.INVALID_JSON_POINTER;
+        var json_pointer = json_pointer_[1..];
+        const slash = mem.indexOfScalar(u8, json_pointer, '/');
+        const key = json_pointer[0 .. slash orelse json_pointer.len];
+        // Grab the child with the given key
+        var child: Value = undefined;
+
+        // TODO: escapes
+        // If there is an escape character in the key, unescape it and then get the child.
+        //   const escape = mem.indexOfScalar(u8, key, '~');
+        //   if (escape != null) {
+        //     // Unescape the key
+        //     std::string unescaped(key);
+        //     do {
+        //       switch (unescaped[escape+1]) {
+        //         case '0':
+        //           unescaped.replace(escape, 2, "~");
+        //           break;
+        //         case '1':
+        //           unescaped.replace(escape, 2, "/");
+        //           break;
+        //         default:
+        //           return error.INVALID_JSON_POINTER; // "Unexpected ~ escape character in JSON pointer");
+        //       }
+        //       escape = unescaped.find('~', escape+1);
+        //     } while (escape != std::string::npos);
+        //     child = find_field(unescaped);  // Take note find_field does not unescape keys when matching
+        //   } else {
+        child = try o.find_field(key);
+        child.iter.iter.err catch return child; // we do not continue if there was an error
+
+        // If there is a /, we have to recurse and look up more of the path
+        if (slash != null)
+            child = try child.at_pointer(json_pointer[slash.?..]);
+        return child;
+    }
 };
 
 const ArrayIterator = struct {
@@ -152,6 +198,48 @@ const Array = struct {
     }
     pub fn iterator(o: Array) ArrayIterator {
         return ArrayIterator.init(o.iter);
+    }
+
+    pub fn at(a: *Array, index: usize) !?Value {
+        var it = a.iterator();
+        var i: usize = 0;
+        while (try it.next()) |e| : (i += 1)
+            if (i == index) return e;
+
+        return null;
+    }
+    pub fn at_pointer(a: *Array, json_pointer_: []const u8) !Value {
+        if (json_pointer_[0] != '/') return error.INVALID_JSON_POINTER;
+        var json_pointer = json_pointer_[1..];
+        // - means "the append position" or "the element after the end of the array"
+        // We don't support this, because we're returning a real element, not a position.
+        if (json_pointer.len == 1 and json_pointer[0] == '-') return error.INDEX_OUT_OF_BOUNDS;
+
+        // Read the array index
+        var array_index: usize = 0;
+        var i: usize = 0;
+        while (i < json_pointer.len and json_pointer[i] != '/') : (i += 1) {
+            const digit = json_pointer[i] - '0';
+            // Check for non-digit in array index. If it's there, we're trying to get a field in an object
+            if (digit > 9) return error.INCORRECT_TYPE;
+            array_index = array_index * 10 + digit;
+        }
+
+        // 0 followed by other digits is invalid
+        if (i > 1 and json_pointer[0] == '0') return error.INVALID_JSON_POINTER; // "JSON pointer array index has other characters after 0"
+
+        // Empty string is invalid; so is a "/" with no digits before it
+        if (i == 0) return error.INVALID_JSON_POINTER; // "Empty string in JSON pointer array index"
+        // Get the child
+        var child = (try a.at(array_index)) orelse return error.INVALID_JSON_POINTER;
+        // If there is an error, it ends here
+        child.iter.iter.err catch return child;
+
+        // If there is a /, we're not done yet, call recursively.
+        if (i < json_pointer.len)
+            child = try child.at_pointer(json_pointer[i..]);
+
+        return child;
     }
 };
 const TokenIterator = struct {
@@ -365,7 +453,14 @@ pub const Iterator = struct {
         tmpbuf[max_len] = ' ';
         return true;
     }
+
+    pub fn rewind(iter: *Iterator) !void {
+        iter.token.index = iter.parser.structural_indices().ptr;
+        iter.log.start(iter); // We start again
+        iter.depth = 1;
+    }
 };
+
 const ValueIterator = struct {
     iter: Iterator, // this needs to be a value, not a pointer
     depth: u32,
@@ -953,6 +1048,18 @@ const ValueIterator = struct {
         return max_len >= 4 and !atom_parsing.is_valid_atom(json[0..4], 4, atom_parsing.atom_null) or
             (max_len == 4 or CharUtils.is_structural_or_whitespace(json[5]));
     }
+
+    pub fn get_type(vi: *ValueIterator) !ValueType {
+        return switch ((try vi.peek_start(1))[0]) {
+            '{' => .object,
+            '[' => .array,
+            '"' => .string,
+            'n' => .nul,
+            't', 'f' => .bool,
+            '-', '0', '9' => .number,
+            else => error.TAPE_ERROR,
+        };
+    }
 };
 
 fn unsafe_is_equal(a: [*]const u8, target: []const u8) bool {
@@ -973,6 +1080,22 @@ fn unsafe_is_equal(a: [*]const u8, target: []const u8) bool {
     }
     return true;
 }
+
+pub const ValueType = enum(u3) {
+    // Start at 1 to catch uninitialized / default values more easily
+    /// A JSON array   ( [ 1, 2, 3 ... ] )
+    array = 1,
+    /// A JSON object  ( { "a": 1, "b" 2, ... } )
+    object,
+    /// A JSON number  ( 1 or -2.3 or 4.5e6 ...)
+    number,
+    /// A JSON string  ( "a" or "hello world\n" ...)
+    string,
+    /// A JSON boolean (true or false)
+    bool,
+    /// A JSON null    (null)
+    nul,
+};
 
 pub const Document = struct {
     iter: Iterator,
@@ -1020,6 +1143,24 @@ pub const Document = struct {
     }
     pub fn is_null(doc: *Document) !bool {
         return doc.get_root_value_iterator().is_root_null();
+    }
+
+    pub fn rewind(doc: *Document) !void {
+        return doc.iter.rewind();
+    }
+
+    pub fn get_type(doc: *Document) !ValueType {
+        return doc.get_root_value_iterator().get_type();
+    }
+    pub inline fn at_pointer(doc: *Document, json_pointer: []const u8) !Value {
+        try doc.rewind(); // Rewind the document each time at_pointer is called
+        if (json_pointer.len == 0)
+            return doc.resume_value();
+        return switch (try doc.get_type()) {
+            .array => (try doc.get_array()).at_pointer(json_pointer),
+            .object => (try doc.get_object()).at_pointer(json_pointer),
+            else => error.INVALID_JSON_POINTER,
+        };
     }
 };
 

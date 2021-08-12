@@ -21,7 +21,6 @@ echo $? # 0 on success
 
 ```zig
 const dom = @import("dom.zig");
-
 test "get with struct" {
     const S = struct { a: u8, b: u8, c: struct { d: u8 } };
     const input =
@@ -48,6 +47,18 @@ test "at_pointer" {
     try testing.expectEqual(@as(i64, 1), try b0.get_int64());
 }
 
+const ondemand = @import("ondemand.zig");
+test "ondemand at_pointer" {
+    const input =
+        \\{"a": {"b": [1,2,3]}}
+    ;
+    var src = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(input) };
+    var parser = try ondemand.Parser.init(&src, allr, "<fba>", .{});
+    defer parser.deinit();
+    var doc = try parser.iterate();
+    var b0 = try doc.at_pointer("/a/b/0");
+    try testing.expectEqual(@as(u8, 1), try b0.get_int(u8));
+}
 ```
 
 # performance
