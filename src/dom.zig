@@ -270,7 +270,7 @@ const Utf8Checker = struct {
     }
 
     inline fn check_next_input(checker: *Utf8Checker, input: u8x64) void {
-        // const NUM_CHUNKS = step_size / 32;
+        // const NUM_CHUNKS = STEP_SIZE / 32;
         const NUM_CHUNKS = 2;
         const chunks = @bitCast([NUM_CHUNKS][32]u8, input);
         if (is_ascii(input)) {
@@ -467,8 +467,8 @@ pub const StructuralIndexer = struct {
         };
     }
 
-    pub fn step(si: *StructuralIndexer, read_buf: [step_size]u8, parser: *Parser, reader_pos: u64) !void {
-        if (step_size == 64) {
+    pub fn step(si: *StructuralIndexer, read_buf: [STEP_SIZE]u8, parser: *Parser, reader_pos: u64) !void {
+        if (STEP_SIZE == 64) {
             const block_1 = nextBlock(parser, read_buf);
             // println("{b:0>64} | characters.op", .{@bitReverse(u64, block_1.characters.op)});
             try si.next(read_buf, block_1, reader_pos);
@@ -561,7 +561,7 @@ pub const StructuralIndexer = struct {
         const chunks = @bitCast([2]u8x32, input_vec);
         const unescaped = lteq(u8, chunks, 0x1F);
         if (debug) {
-            var input: [step_size]u8 = undefined;
+            var input: [STEP_SIZE]u8 = undefined;
             std.mem.copy(u8, &input, &@as([64]u8, input_vec));
             for (input) |*c| {
                 if (c.* == '\n') c.* = '-';
@@ -1248,12 +1248,12 @@ pub const Parser = struct {
 
     fn stage1(parser: *Parser) !void {
         const end_pos = parser.input_len;
-        const end_pos_minus_step = if (end_pos > step_size) end_pos - step_size else 0;
+        const end_pos_minus_step = if (end_pos > STEP_SIZE) end_pos - STEP_SIZE else 0;
 
         var pos: u32 = 0;
-        while (pos < end_pos_minus_step) : (pos += step_size) {
+        while (pos < end_pos_minus_step) : (pos += STEP_SIZE) {
             // println("i {} pos {}", .{ i, pos });
-            const read_buf = parser.bytes[pos..][0..step_size];
+            const read_buf = parser.bytes[pos..][0..STEP_SIZE];
             try parser.indexer.step(read_buf.*, parser, pos);
             // for (blocks) |block| {
             //     println("{b:0>64} | characters.whitespace", .{@bitReverse(u64, block.characters.whitespace)});
@@ -1261,11 +1261,11 @@ pub const Parser = struct {
             //     println("{b:0>64} | in_string", .{@bitReverse(u64, block.strings.in_string)});
             // }
         }
-        var read_buf = [1]u8{0x20} ** step_size;
+        var read_buf = [1]u8{0x20} ** STEP_SIZE;
         std.mem.copy(u8, &read_buf, parser.bytes[pos..end_pos]);
         // std.log.debug("read_buf {d}", .{read_buf});
         try parser.indexer.step(read_buf, parser, pos);
-        try parser.indexer.finish(parser, pos + step_size, end_pos, STREAMING);
+        try parser.indexer.finish(parser, pos + STEP_SIZE, end_pos, STREAMING);
     }
 
     fn stage2(parser: *Parser) !void {

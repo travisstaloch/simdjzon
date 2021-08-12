@@ -1197,13 +1197,13 @@ pub const Parser = struct {
 
     pub fn stage1(p: *Parser) !void {
         var pos: u32 = 0;
-        var read_buf: [step_size]u8 = undefined;
+        var read_buf: [STEP_SIZE]u8 = undefined;
         var bytes_read: u32 = undefined;
         println("", .{});
-        while (true) : (pos += step_size) {
+        while (true) : (pos += STEP_SIZE) {
             // println("i {} pos {}", .{ i, pos });
             bytes_read = @intCast(u32, try p.src.read(&read_buf));
-            if (bytes_read < step_size) break;
+            if (bytes_read < STEP_SIZE) break;
 
             try p.parser.indexer.step(read_buf, &p.parser, pos);
             // for (blocks) |block| {
@@ -1215,7 +1215,7 @@ pub const Parser = struct {
         std.mem.set(u8, read_buf[bytes_read..], 0x20);
         // std.log.debug("read_buf {d}", .{read_buf});
         try p.parser.indexer.step(read_buf, &p.parser, pos);
-        try p.parser.indexer.finish(&p.parser, pos + step_size, pos + bytes_read, STREAMING);
+        try p.parser.indexer.finish(&p.parser, pos + STEP_SIZE, pos + bytes_read, STREAMING);
     }
 
     pub fn iterate(p: *Parser) !Document {

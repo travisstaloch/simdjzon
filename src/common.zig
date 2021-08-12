@@ -1,13 +1,12 @@
-const build_options = @import("build_options");
 const std = @import("std");
 
-pub const DEFAULT_MAX_DEPTH = 1024;
-pub const step_size = build_options.step_size;
+const root = @import("root");
+pub const STEP_SIZE = if (@hasDecl(root, "step_size")) root.step_size else 64;
 comptime {
-    std.debug.assert(step_size == 64 or step_size == 128);
+    if (!(STEP_SIZE == 64 or STEP_SIZE == 128)) @compileError("step-size must be either 64 or 128");
 }
-
-pub const u8xstep_size = std.meta.Vector(step_size, u8);
+pub const DEFAULT_MAX_DEPTH = 1024;
+pub const u8xstep_size = std.meta.Vector(STEP_SIZE, u8);
 pub const STREAMING = false;
 pub const SIMDJSON_PADDING = 32;
 

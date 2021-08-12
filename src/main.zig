@@ -1,9 +1,11 @@
+const build_options = @import("build_options");
 const std = @import("std");
 
 const os = std.os;
 usingnamespace @import("common.zig");
 const simdjzon = @import("simdjzon.zig");
 const dom = simdjzon.dom;
+pub const step_size = build_options.step_size;
 
 pub fn main() !u8 {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
