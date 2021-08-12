@@ -44,18 +44,6 @@ pub fn main() !u8 {
     return 0;
 }
 
-pub fn main2() !u8 {
-    // try test_search_tape();
-    // var parser = try Parser.initFile(allr, "../../c/simdjson/jsonexamples/twitter.json", .{});
-    // defer parser.deinit();
-    // try parser.parse();
-    // const count = try parser.element().at_key("search_metadata").?.at_key("count").?.get_int64();
-    // try testing.expectEqual(@as(i64, 100), count);
-    // try test_json_pointer();
-    try test_ondemand();
-    return 0;
-}
-
 const TapeType = dom.TapeType;
 
 const allr = testing.allocator;
@@ -319,8 +307,9 @@ test "ondemand" {
     try test_ondemand();
 }
 
-const E = Error || error{ TestExpectedEqual, TestUnexpectedResult };
+const E = Error || error{ TestExpectedEqual, TestUnexpectedResult, TestExpectedApproxEqAbs };
 fn test_ondemand_doc(input: []const u8, expected: fn (doc: *ondemand.Document) E!void) !void {
+    // std.debug.print("\n0123456789012345678901234567890123456789\n{s}\n", .{input});
     var src = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(input) };
     var parser = try ondemand.Parser.init(&src, allr, "<fba>", .{});
     defer parser.deinit();
@@ -333,7 +322,6 @@ fn test_ondemand() !void {
         \\ {"x": 1, "y": 2, "z": {"a": 33}}
     , struct {
         fn func(doc: *ondemand.Document) E!void {
-            //
             try testing.expectEqual(@as(u64, 2), try (try doc.find_field("y")).get_int(u64));
             try testing.expectEqual(@as(u64, 1), try (try doc.find_field("x")).get_int(u64));
             try testing.expectEqual(@as(u8, 33), try (try (try doc.find_field("z")).find_field("a")).get_int(u8));
@@ -348,16 +336,75 @@ fn test_ondemand() !void {
             var objit = obj.iterator();
             var buf: [10]u8 = undefined;
 
-            var f1 = try objit.next(&buf);
-            try testing.expect(f1 != null);
+            var f1 = (try objit.next(&buf)) orelse return testing.expect(false);
             try testing.expectEqualStrings("x", buf[0..1]);
-            try testing.expectEqual(@as(u64, 1), try f1.?.iter.get_int(u64));
+            try testing.expectEqual(@as(u64, 1), try f1.get_int(u64));
 
-            var f2 = try objit.next(&buf);
+            var f2 = (try objit.next(&buf)) orelse return testing.expect(false);
             try testing.expectEqualStrings("y", buf[0..1]);
-            try testing.expectEqual(@as(u64, 2), try f2.?.iter.get_int(u64));
+            try testing.expectEqual(@as(u64, 2), try f2.get_int(u64));
 
             try testing.expect((try objit.next(&buf)) == null);
         }
     }.func);
+
+    try test_ondemand_doc(
+        \\ {"str": "strval", "f": 1.23, "t": true, "not": false, "n": null, "neg": -42 }
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            var obj = try doc.get_object();
+            var objit = obj.iterator();
+            var buf: [10]u8 = undefined;
+            {
+                var f = (try objit.next(&buf)) orelse return testing.expect(false);
+                try testing.expectEqualStrings("str", buf[0..3]);
+                try testing.expectEqualStrings("strval", try f.iter.get_string(&buf));
+            }
+            {
+                var f = (try objit.next(&buf)) orelse return testing.expect(false);
+                try testing.expectEqualStrings("f", buf[0..1]);
+                try testing.expectApproxEqAbs(@as(f64, 1.23), try f.iter.get_double(), std.math.f64_epsilon);
+            }
+            {
+                var f = (try objit.next(&buf)) orelse return testing.expect(false);
+                try testing.expectEqualStrings("t", buf[0..1]);
+                try testing.expectEqual(true, try f.iter.get_bool());
+            }
+            {
+                var f = (try objit.next(&buf)) orelse return testing.expect(false);
+                try testing.expectEqualStrings("not", buf[0..3]);
+                try testing.expectEqual(false, try f.iter.get_bool());
+            }
+            {
+                var f = (try objit.next(&buf)) orelse return testing.expect(false);
+                try testing.expectEqualStrings("n", buf[0..1]);
+                try testing.expectEqual(false, try f.iter.is_null());
+            }
+            {
+                var f = (try objit.next(&buf)) orelse return testing.expect(false);
+                try testing.expectEqualStrings("neg", buf[0..3]);
+                try testing.expectEqual(@as(i8, -42), try f.iter.get_int(i8));
+            }
+
+            try testing.expect((try objit.next(&buf)) == null);
+        }
+    }.func);
+
+    // try test_ondemand_doc(
+    //     \\ [1,2]
+    // , struct {
+    //     fn func(doc: *ondemand.Document) E!void {
+    //         var arr = try doc.get_array();
+    //         var arrit = arr.iterator();
+
+    //         var e1 = (try arrit.next(&buf)) orelse return testing.expect(false);
+    //         try testing.expectEqual(@as(u64, 1), try e1.get_int(u64));
+
+    //         var e2 = (try arrit.next(&buf)) orelse return testing.expect(false);
+    //         try testing.expectEqualStrings("y", buf[0..1]);
+    //         try testing.expectEqual(@as(u64, 2), try e2.get_int(u64));
+
+    //         try testing.expect((try arrit.next(&buf)) == null);
+    //     }
+    // }.func);
 }

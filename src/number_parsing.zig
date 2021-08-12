@@ -10,6 +10,7 @@ const dom = @import("dom.zig");
 const Iterator = dom.Iterator;
 const TapeBuilder = dom.TapeBuilder;
 const TapeType = dom.TapeType;
+const common = @import("common.zig");
 
 fn INVALID_NUMBER(src: [*]const u8) Error {
     _ = src;
@@ -1829,4 +1830,95 @@ pub fn parse_integer(src: [*]const u8) !u64 {
     }
 
     return if (negative) (~i + 1) else i;
+}
+
+pub fn parse_double(src_: [*]const u8) !f64 {
+    //
+    // Check for minus sign
+    //
+    const negative = (src_[0] == '-');
+    var src = src_ + @boolToInt(negative);
+
+    //
+    // Parse the integer part.
+    //
+    var i: u64 = 0;
+    var p = src;
+    p += @boolToInt(parse_digit(u64, p[0], &i));
+    const leading_zero = (i == 0);
+    while (parse_digit(u64, p[0], &i)) {
+        p += 1;
+    }
+    // no integer digits, or 0123 (zero must be solo)
+    if (p == src) return error.INCORRECT_TYPE;
+    if ((leading_zero and p != src + 1)) {
+        return error.NUMBER_ERROR;
+    }
+
+    //
+    // Parse the decimal part.
+    //
+    var exponent: i64 = 0;
+    var overflow: bool = undefined;
+    if (p[0] == '.') {
+        p += 1;
+        const start_decimal_digits = p;
+        if (!parse_digit(u64, p[0], &i)) return error.NUMBER_ERROR; // no decimal digits
+        p += 1;
+        while (parse_digit(u64, p[0], &i)) {
+            p += 1;
+        }
+        exponent = - try common.ptr_diff(i64, p, start_decimal_digits);
+
+        // Overflow check. More than 19 digits (minus the decimal) may be overflow.
+        overflow = (try common.ptr_diff(u16, p, src)) - 1 > 19;
+        if (overflow and leading_zero) {
+            // Skip leading 0.00000 and see if it still overflows
+            var start_digits = src + 2;
+            while (start_digits[0] == '0') {
+                start_digits += 1;
+            }
+            overflow = @ptrToInt(start_digits) - @ptrToInt(src) > 19;
+        }
+    } else {
+        overflow = (try common.ptr_diff(u16, p, src)) > 19;
+    }
+
+    //
+    // Parse the exponent
+    //
+    if (p[0] == 'e' or p[0] == 'E') {
+        p += 1;
+        const exp_neg = p[0] == '-';
+        p += @boolToInt(exp_neg or p[0] == '+');
+
+        var exp: u64 = 0;
+        const start_exp_digits = p;
+        while (parse_digit(u64, p[0], &exp)) {
+            p += 1;
+        }
+        // no exp digits, or 20+ exp digits
+        const num_exp_digits = try common.ptr_diff(u16, p, start_exp_digits);
+        if (num_exp_digits == 0 or num_exp_digits > 19) return error.NUMBER_ERROR;
+
+        exponent += @bitCast(i64, if (exp_neg) 0-%exp else exp);
+    }
+
+    if (CharUtils.is_not_structural_or_whitespace(p[0])) return error.NUMBER_ERROR;
+
+    overflow = overflow or exponent < smallest_power or exponent > largest_power;
+
+    //
+    // Assemble (or slow-parse) the float
+    //
+    var d: f64 = undefined;
+    if (!overflow) {
+        if (compute_float_64(exponent, i, negative, &d)) {
+            return d;
+        }
+    }
+    if (!parse_float_fallback(src - @boolToInt(negative), &d)) {
+        return error.NUMBER_ERROR;
+    }
+    return d;
 }

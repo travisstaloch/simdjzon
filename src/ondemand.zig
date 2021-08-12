@@ -8,6 +8,7 @@ const dom = @import("dom.zig");
 const Logger = @import("Logger.zig");
 const number_parsing = @import("number_parsing.zig");
 const string_parsing = @import("string_parsing.zig");
+const atom_parsing = @import("atom_parsing.zig");
 const CharUtils = string_parsing.CharUtils;
 
 pub const Value = struct {
@@ -37,23 +38,28 @@ pub const ObjectIterator = struct {
     fn init(iter: ValueIterator) ObjectIterator {
         return ObjectIterator{ .iter = iter };
     }
+    /// if there is a next field, copies the unescaped key into key_buf
+    /// and returns a new iterator at the key's value
     pub fn next(oi: *ObjectIterator, key_buf: []u8) !?ObjectIterator {
-        var has_value = false;
         errdefer oi.iter.abandon();
-        if (oi.iter.at_first_field()) {
-            has_value = true;
-        } else if (!oi.iter.is_open()) {
-            has_value = false;
-        } else {
+        const has_value = if (oi.iter.at_first_field())
+            true
+        else if (!oi.iter.is_open())
+            false
+        else blk: {
             try oi.iter.skip_child();
-            has_value = try oi.iter.has_next_field();
-        }
+            break :blk try oi.iter.has_next_field();
+        };
         if (has_value) {
             ValueIterator.copy_key_without_quotes(key_buf, try oi.iter.field_key(key_buf.len), key_buf.len);
             try oi.iter.field_value();
             return ObjectIterator{ .iter = oi.iter.child() };
         }
         return null;
+    }
+
+    pub fn get_int(oi: *ObjectIterator, comptime T: type) !T {
+        return oi.iter.get_int(T);
     }
 };
 pub const Object = struct {
@@ -88,8 +94,11 @@ pub const Object = struct {
 const TokenIterator = struct {
     src: std.io.StreamSource,
     buf: [mem.page_size]u8 = undefined,
+    /// result of src.read() - number of bytes read from src
     buf_len: u16 = 0,
+    /// src index of the start of the buffer.  set to index[0] each src.read()
     buf_start_pos: u32,
+    /// src index
     index: [*]const u32,
 
     pub fn peek_delta(ti: *TokenIterator, delta: i32, len: u16) ![*]const u8 {
@@ -103,14 +112,16 @@ const TokenIterator = struct {
     }
 
     /// position: pointer to a src position
-    /// len: requested length to be read from src, starting at position
-    pub fn peek(ti: *TokenIterator, position: [*]const u32, len: u16) ![*]const u8 {
+    /// len_hint: requested length to be read from src, starting at position
+    pub fn peek(ti: *TokenIterator, position: [*]const u32, len_hint: u16) ![*]const u8 {
+        if (len_hint > ti.buf.len) return error.CAPACITY;
         const start = position[0];
-        const end = start + std.math.min(len, ti.buf_len);
-        // println("start {} end {} ti.buf_start_pos {} ti.buf_len {} len {}", .{ start, end, ti.buf_start_pos, ti.buf_len, len });
-        if (ti.buf_start_pos <= start and end < ti.buf_start_pos + len)
+        // const end = start + len;
+        // println("\nTokenIterator: {} <= start {} end {} < ti.buf_start_pos + len {}", .{ ti.buf_start_pos, start, end, ti.buf_start_pos + ti.buf_len });
+        if (ti.buf_start_pos <= start and start < ti.buf_start_pos + ti.buf_len)
             return @ptrCast([*]const u8, &ti.buf) + (start - ti.buf_start_pos);
-
+        // println("TokenIterator: seek and read()", .{});
+        if (start == ti.buf_start_pos + ti.buf_len) return error.CAPACITY;
         try ti.src.seekTo(start);
         ti.buf_start_pos = start;
         ti.buf_len = @truncate(u16, try ti.src.read(&ti.buf));
@@ -120,7 +131,6 @@ const TokenIterator = struct {
 pub const Iterator = struct {
     token: TokenIterator,
     parser: *Parser,
-    string_buf_loc: [*]const u8,
     err: Error!void = {},
     depth: u32,
     log: Logger = .{ .depth = 0 },
@@ -130,7 +140,6 @@ pub const Iterator = struct {
             .token = .{ .src = src, .index = parser.structural_indices().ptr, .buf_start_pos = 0 },
             .parser = parser,
             .err = undefined,
-            .string_buf_loc = parser.parser.doc.string_buf.ptr,
             .depth = 1,
         };
     }
@@ -270,12 +279,16 @@ pub const Iterator = struct {
         iter.token.index = position;
         iter.depth = child_depth;
     }
+
+    pub fn string_buf_loc(iter: Iterator) [*]const u8 {
+        return @ptrCast([*]const u8, &iter.token.buf) + iter.token.index[0] - iter.token.buf_start_pos;
+    }
 };
 const ValueIterator = struct {
     iter: Iterator, // this needs to be a value, not a pointer
     depth: u32,
-
     start_position: [*]const u32,
+
     pub fn init(iter: Iterator, depth: u32, start_position: [*]const u32) ValueIterator {
         return .{
             .iter = iter,
@@ -289,9 +302,17 @@ const ValueIterator = struct {
     fn parse_null(json: [*]const u8) bool {
         return !atom_parsing.is_valid_atom(json, 4, atom_parsing.atom_null) and CharUtils.is_structural_or_whitespace(json[4]);
     }
+    fn parse_bool(vi: *ValueIterator, json: [*]const u8) !bool {
+        const not_true = !(atom_parsing.is_valid_atom(json, 4, atom_parsing.atom_true));
+        const not_false = !(atom_parsing.is_valid_atom(json, 4, atom_parsing.atom_fals) and json[4] == 'e');
+        const err = (not_true and not_false) or
+            CharUtils.is_not_structural_or_whitespace(json[if (not_true) 5 else 4]);
+        if (err) return vi.incorrect_type_error("Not a boolean");
+        return !not_true;
+    }
 
     pub fn is_null(vi: *ValueIterator) !bool {
-        return parse_null(try vi.advance_non_root_scalar("null"));
+        return parse_null(try vi.advance_non_root_scalar("null", 4));
     }
     fn is_at_start(vi: ValueIterator) bool {
         return vi.iter.token.index == vi.start_position;
@@ -705,9 +726,49 @@ const ValueIterator = struct {
 
     pub fn get_int(vi: *ValueIterator, comptime T: type) !T {
         const peek_len = comptime try std.math.cast(u16, std.math.log10(@as(usize, std.math.maxInt(T))));
-        return std.math.cast(T, try number_parsing.parse_integer(
+        const u64int = try number_parsing.parse_integer(
             try vi.advance_non_root_scalar(@typeName(T), peek_len),
-        ));
+        );
+        return std.math.cast(T, if (@typeInfo(T).Int.signedness == .signed)
+            @bitCast(i64, u64int)
+        else
+            u64int);
+    }
+
+    pub fn unescape(src: [*]const u8, dst: [*]u8) ![]const u8 {
+        const end = string_parsing.parse_string(src, dst) orelse return error.STRING_ERROR;
+        const len = try ptr_diff(u32, end, dst);
+        return dst[0..len];
+    }
+
+    pub fn get_string(vi: *ValueIterator, dest: []u8) ![]const u8 {
+        return unescape(try vi.get_raw_json_string(try std.math.cast(u16, dest.len)), dest.ptr);
+    }
+
+    fn advance_start(vi: *ValueIterator, typ: []const u8, buf_len: u16) ![*]const u8 {
+        vi.iter.log.value2(&vi.iter, typ, "", vi.start_position[0], vi.depth);
+        // If we're not at the position anymore, we don't want to advance the cursor.
+        if (!vi.is_at_start()) return vi.peek_start(buf_len);
+
+        // Get the JSON and advance the cursor, decreasing depth to signify that we have retrieved the value.
+        vi.assert_at_start();
+        const result = try vi.iter.advance(buf_len);
+        vi.iter.ascend_to(vi.depth - 1);
+        return result;
+    }
+
+    pub fn get_raw_json_string(vi: *ValueIterator, buf_len: u16) ![*]const u8 {
+        const json = try vi.advance_start("string", buf_len);
+        if (json[0] != '"')
+            return vi.incorrect_type_error("Not a string");
+        return json + 1;
+    }
+
+    pub fn get_double(vi: *ValueIterator) !f64 {
+        return number_parsing.parse_double(try vi.advance_non_root_scalar("double", 40));
+    }
+    pub fn get_bool(vi: *ValueIterator) !bool {
+        return vi.parse_bool(try vi.advance_non_root_scalar("bool", 5));
     }
 };
 

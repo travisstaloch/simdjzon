@@ -1017,19 +1017,19 @@ pub const TapeBuilder = struct {
     inline fn visit_true_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log.value(iter, "true");
         assert(value[0] == 't');
-        if (!atom_parsing.is_valid_true_atom(value + 1)) return error.T_ATOM_ERROR;
+        if (!atom_parsing.is_valid_rue_atom(value + 1)) return error.T_ATOM_ERROR;
         tb.append(0, TapeType.TRUE);
     }
     inline fn visit_false_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log.value(iter, "false");
         assert(value[0] == 'f');
-        if (!atom_parsing.is_valid_false_atom(value + 1)) return error.T_ATOM_ERROR;
+        if (!atom_parsing.is_valid_alse_atom(value + 1)) return error.T_ATOM_ERROR;
         tb.append(0, TapeType.FALSE);
     }
     inline fn visit_null_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
         iter.log.value(iter, "null");
         assert(value[0] == 'n');
-        if (!atom_parsing.is_valid_null_atom(value + 1)) return error.T_ATOM_ERROR;
+        if (!atom_parsing.is_valid_ull_atom(value + 1)) return error.T_ATOM_ERROR;
         tb.append(0, TapeType.NULL);
     }
 

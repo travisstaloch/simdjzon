@@ -54,6 +54,7 @@ pub fn line_fmt(log: *Logger, iter: anytype, title_prefix: []const u8, title: []
     log.line(iter, title_prefix, title, std.fmt.bufPrint(&buf, detail_fmt, detail_args) catch unreachable);
 }
 
+// TODO: remove catch unreachables
 pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []const u8, detail: []const u8) void {
     var log_buf: [0x100]u8 = undefined;
     var log_buf2: [LOG_BUFFER_LEN]u8 = undefined;
@@ -71,8 +72,8 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
     const content = blk: {
         if (current_index) |ci| {
             if (is_ondemand) {
-                const len = std.math.min(iter.token.buf_len, log_buf2.len);
-                const ptr = iter.peek(ci, len) catch unreachable;
+                var len = std.math.min(iter.token.buf_len, log_buf2.len);
+                const ptr = iter.peek(ci, len) catch break :blk null;
                 mem.copy(u8, &log_buf2, ptr[0..len]);
             }
 
@@ -91,7 +92,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
     const next_content = blk: {
         if (is_ondemand) {
             const len = std.math.min(iter.token.buf_len, log_buf2.len);
-            const ptr = iter.peek(next_index, len) catch unreachable;
+            const ptr = iter.peek(next_index, len) catch break :blk null;
             mem.copy(u8, &log_buf2, ptr[0..len]);
         }
 
