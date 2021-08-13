@@ -5,18 +5,20 @@ This is a port of [simdjson](https://github.com/simdjson/simdjson), a high perfo
 
 
 # requirements
-A CPU with both AVX2 and CLMUL is required (Haswell from 2013 onwards should do for Intel, for AMD a Ryzen/EPYC CPU (Q1 2017) should be sufficient).
+A CPU with both AVX2 and CLMUL is required (Haswell from 2013 onwards should do for Intel, for AMD a Ryzen/EPYC CPU (Q1 2017) should be sufficient).  Macos is (not yet) supported.
 
 No fallback for unsupported CPUs is provided.
 
 # usage
 ```console
 # json validation
-git clone https://github.com/travisstaloch/simdjzon
-zig build -Drelease-fast
-zig-out/bin/simdjzon test/test.json
-echo $? # 0 on success
+$ git clone https://github.com/travisstaloch/simdjzon
+$ zig build -Drelease-fast
+$ zig-out/bin/simdjzon test/test.json
+$ echo $? # 0 on success
 0
+$ zig build test
+All 19 tests passed.
 ```
 
 ```zig
@@ -61,6 +63,28 @@ test "ondemand at_pointer" {
 }
 ```
 
+## gyro package manager
+### add dependency
+```console
+$ gyro add --src github travisstaloch/simdjzon
+```
+
+### modify
+```zig
+// build.zig
+const deps = @import("deps.zig");
+...
+    deps.pkgs.addAllTo(exe);
+    exe.linkLibC();
+    // add c files / include dir
+    const gyro_src_dir = deps.base_dirs.simdjzon ++ "/src/";
+    exe.addCSourceFile(gyro_src_dir ++ "utils.c", &.{});
+    exe.addIncludeDir(gyro_src_dir);
+```
+### build
+```console
+gyro build
+```
 # performance
 ## parsing/validating twitter.json (630Kb)
 ### simdjson
