@@ -347,7 +347,7 @@ test "ondemand struct iteration types" {
             {
                 var f = (try objit.next(&buf)) orelse return testing.expect(false);
                 try testing.expectEqualStrings("n", buf[0..1]);
-                try testing.expectEqual(false, try f.value.is_null());
+                try testing.expectEqual(true, try f.value.is_null());
             }
             {
                 var f = (try objit.next(&buf)) orelse return testing.expect(false);
@@ -481,6 +481,40 @@ test "ondemand at, array at_pointer" {
             try testing.expectEqual(@as(u8, 1), try (try arr.at_pointer("/0")).get_int(u8));
             try testing.expectEqual(@as(u8, 2), try (try arr.at_pointer("/1")).get_int(u8));
             try testing.expectError(error.INVALID_JSON_POINTER, arr.at_pointer("/2"));
+        }
+    }.func);
+}
+
+test "ondemand get struct" {
+    try test_ondemand_doc(
+        \\{"a": 1, "b": 2, "c": {"d": 3}}
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            const S = struct { a: u8, b: u8, c: struct { d: u8 } };
+            var s: S = undefined;
+            try doc.get(&s);
+            try testing.expectEqual(@as(u8, 1), s.a);
+            try testing.expectEqual(@as(u8, 2), s.b);
+            try testing.expectEqual(@as(u8, 3), s.c.d);
+        }
+    }.func);
+    try test_ondemand_doc(
+        \\{"a": {"b": [1,2,3], "c": 3.1415, "d": true, "e": "e-string", "f": null, "g": [4,5,6]}}
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            const S = struct { a: struct { b: [3]u8, c: f32, d: bool, f: ?u8, g: []u8, e: []u8 } };
+            var s: S = undefined;
+            s.a.g = try allr.alloc(u8, 3);
+            defer allr.free(s.a.g);
+            s.a.e = try allr.alloc(u8, 8);
+            defer allr.free(s.a.e);
+            try doc.get(&s);
+            try testing.expectApproxEqAbs(@as(f32, 3.1416), s.a.c, std.math.f16_epsilon);
+            try testing.expectEqual(true, s.a.d);
+            try testing.expectEqual(@as(?u8, null), s.a.f);
+            try testing.expectEqualSlices(u8, &.{ 1, 2, 3 }, &s.a.b);
+            try testing.expectEqualSlices(u8, &.{ 4, 5, 6 }, s.a.g);
+            try testing.expectEqualStrings("e-string", s.a.e);
         }
     }.func);
 }

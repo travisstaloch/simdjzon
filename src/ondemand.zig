@@ -47,12 +47,77 @@ pub const Value = struct {
         return v.iter.is_null();
     }
 
-    pub inline fn at_pointer(v: *Value, json_pointer: []const u8) !Value {
+    pub fn at_pointer(v: *Value, json_pointer: []const u8) !Value {
         return switch (try v.iter.get_type()) {
             .array => (try v.get_array()).at_pointer(json_pointer),
             .object => (try v.get_object()).at_pointer(json_pointer),
             else => error.INVALID_JSON_POINTER,
         };
+    }
+
+    pub fn get(val: *Value, out: anytype) Error!void {
+        const T = @TypeOf(out);
+        const info = @typeInfo(T);
+        switch (info) {
+            .Pointer => {
+                const C = std.meta.Child(T);
+                const child_info = @typeInfo(C);
+                switch (info.Pointer.size) {
+                    .One => {
+                        switch (child_info) {
+                            .Int => out.* = try val.get_int(C),
+                            .Float => out.* = @floatCast(C, try val.get_double()),
+                            .Bool => out.* = try val.get_bool(),
+                            .Optional => out.* = if (try val.is_null())
+                                null
+                            else blk: {
+                                var x: std.meta.Child(C) = undefined;
+                                try val.get(&x);
+                                break :blk x;
+                            },
+                            .Array => try val.get(@as([]std.meta.Child(C), out)),
+                            .Struct => {
+                                switch (try val.iter.get_type()) {
+                                    .object => {
+                                        var obj = try val.get_object();
+                                        inline for (std.meta.fields(C)) |field| {
+                                            const field_info = @typeInfo(field.field_type);
+                                            if (obj.find_field_unordered(field.name)) |*obj_val|
+                                                if (field_info != .Pointer)
+                                                    try obj_val.get(&@field(out, field.name))
+                                                else
+                                                    try obj_val.get(@field(out, field.name))
+                                            else |_| {}
+                                        }
+                                    },
+                                    else => return error.INCORRECT_TYPE,
+                                }
+                            },
+                            else => @compileError("unsupported type: " ++ @typeName(T) ++
+                                ". expecting int, float, bool or optional type."),
+                        }
+                    },
+                    .Slice => {
+                        switch (try val.iter.get_type()) {
+                            .string => _ = try val.get_string(out),
+                            .array => {
+                                var arr = try val.get_array();
+                                var iter = arr.iterator();
+                                for (out) |*out_ele| {
+                                    var arr_ele = (try iter.next()) orelse break;
+                                    try arr_ele.get(out_ele);
+                                }
+                            },
+                            else => return error.INCORRECT_TYPE,
+                        }
+                    },
+
+                    else => @compileError("unsupported pointer type: " ++ @typeName(T) ++
+                        ". expecting slice or single item pointer."),
+                }
+            },
+            else => @compileError("unsupported type: " ++ @typeName(T) ++ ". expecting pointer type."),
+        }
     }
 };
 
@@ -81,7 +146,7 @@ pub const ObjectIterator = struct {
         if (has_value) {
             ValueIterator.copy_key_without_quotes(key_buf, try oi.iter.field_key(key_buf.len), key_buf.len);
             try oi.iter.field_value();
-            return Field{ .key = @ptrCast([*]const u8, &key_buf), .value = .{ .iter = oi.iter.child() } };
+            return Field{ .key = key_buf.ptr, .value = .{ .iter = oi.iter.child() } };
         }
         return null;
     }
@@ -108,15 +173,17 @@ pub const Object = struct {
     }
 
     pub fn find_field(o: *Object, key: []const u8) !Value {
-        const has_value = try o.iter.find_field_raw(key);
-        if (!has_value) return error.NO_SUCH_FIELD;
-        return Value{ .iter = o.iter.child() };
+        return if (try o.iter.find_field_raw(key))
+            Value{ .iter = o.iter.child() }
+        else
+            error.NO_SUCH_FIELD;
     }
 
     pub fn find_field_unordered(o: *Object, key: []const u8) !Value {
-        const has_value = try o.iter.find_field_unordered_raw(key);
-        if (!has_value) return error.NO_SUCH_FIELD;
-        return Value{ .iter = o.iter.child() };
+        return if (try o.iter.find_field_unordered_raw(key))
+            Value{ .iter = o.iter.child() }
+        else
+            error.NO_SUCH_FIELD;
     }
 
     pub fn at_pointer(o: *Object, json_pointer_: []const u8) !Value {
@@ -124,7 +191,7 @@ pub const Object = struct {
         var json_pointer = json_pointer_[1..];
         const slash = mem.indexOfScalar(u8, json_pointer, '/');
         const key = json_pointer[0 .. slash orelse json_pointer.len];
-        // Grab the child with the given key
+        // Find the child with the given key
         var child: Value = undefined;
 
         // TODO: escapes
@@ -176,8 +243,6 @@ const ArrayIterator = struct {
         };
         if (has_value) {
             defer ai.iter.skip_child() catch {};
-            // std.debug.print("ai.iter.iter.depth {} ai.iter.depth {}\n", .{ ai.iter.iter.depth, ai.iter.depth });
-            // return ArrayIterator{ .iter = ai.iter.child() };
             return Value{ .iter = ai.iter.child() };
         }
         return null;
@@ -204,8 +269,8 @@ const Array = struct {
         var it = a.iterator();
         var i: usize = 0;
         while (try it.next()) |e| : (i += 1)
-            if (i == index) return e;
-
+            if (i == index)
+                return e;
         return null;
     }
     pub fn at_pointer(a: *Array, json_pointer_: []const u8) !Value {
@@ -267,7 +332,6 @@ const TokenIterator = struct {
     pub fn peek(ti: *TokenIterator, position: [*]const u32, len_hint: u16) ![*]const u8 {
         if (len_hint > ti.buf.len) return error.CAPACITY;
         const start = position[0];
-        // const end = start + len;
         // println("\nTokenIterator: {} <= start {} end {} < ti.buf_start_pos + len {}", .{ ti.buf_start_pos, start, end, ti.buf_start_pos + ti.buf_len });
         if (ti.buf_start_pos <= start and start < ti.buf_start_pos + ti.buf_len)
             return @ptrCast([*]const u8, &ti.buf) + (start - ti.buf_start_pos);
@@ -326,8 +390,6 @@ pub const Iterator = struct {
     }
     pub fn root_checkpoint(iter: Iterator) [*]const u32 {
         return iter.parser.structural_indices().ptr;
-        //   return iter.parser.structural_indexes.get();
-
     }
     pub fn skip_child(iter: *Iterator, parent_depth: u32) !void {
         if (iter.depth <= parent_depth) return;
@@ -448,7 +510,6 @@ pub const Iterator = struct {
         }
 
         // Copy to the buffer.
-        //   std::memcpy(tmpbuf, json, max_len);
         @memcpy(tmpbuf, json, max_len);
         tmpbuf[max_len] = ' ';
         return true;
@@ -477,7 +538,8 @@ const ValueIterator = struct {
     //     return doc.resume_value_iterator().at_key(key);
     // }
     fn parse_null(json: [*]const u8) bool {
-        return !atom_parsing.is_valid_atom(json, 4, atom_parsing.atom_null) and CharUtils.is_structural_or_whitespace(json[4]);
+        return atom_parsing.is_valid_atom(json, 4, atom_parsing.atom_null) and
+            CharUtils.is_structural_or_whitespace(json[4]);
     }
     fn parse_bool(vi: *ValueIterator, json: [*]const u8) !bool {
         const not_true = !(atom_parsing.is_valid_atom(json, 4, atom_parsing.atom_true));
@@ -545,13 +607,11 @@ const ValueIterator = struct {
     fn skip_child(vi: *ValueIterator) !void {
         assert(@ptrToInt(vi.iter.token.index) > @ptrToInt(vi.start_position));
         assert(vi.iter.depth >= vi.depth);
-
         return vi.iter.skip_child(vi.depth);
     }
 
     fn has_next_field(vi: *ValueIterator) !bool {
         vi.assert_at_next();
-
         switch ((try vi.iter.advance(1))[0]) {
             '}' => {
                 vi.iter.log.end_value(&vi.iter, "object");
@@ -565,7 +625,6 @@ const ValueIterator = struct {
 
     fn has_next_element(vi: *ValueIterator) !bool {
         vi.assert_at_next();
-
         switch ((try vi.iter.advance(1))[0]) {
             ']' => {
                 vi.iter.log.end_value(&vi.iter, "array");
@@ -688,7 +747,6 @@ const ValueIterator = struct {
     pub fn find_field(vi: ValueIterator, key: []const u8) Value {
         return vi.start_or_resume_object().find_field(key);
     }
-
     fn at_start(vi: ValueIterator) bool {
         return vi.iter.token.index == vi.start_position;
     }
@@ -696,7 +754,6 @@ const ValueIterator = struct {
         assert(@ptrToInt(vi.iter.token.index) > @ptrToInt(vi.start_position));
         return vi.iter.token.index == vi.start_position + 1;
     }
-
     fn abandon(vi: *ValueIterator) void {
         vi.iter.abandon();
     }
@@ -890,7 +947,7 @@ const ValueIterator = struct {
             // size_t max_key_length = vi.iter.peek_length() - 2; // -2 for the two quotes
 
             if (key.len + 2 > key_buf.len) return error.STRING_ERROR;
-            copy_key_with_quotes(&key_buf, try vi.field_key(), key.len);
+            copy_key_with_quotes(&key_buf, try vi.field_key(key.len + 2), key.len);
 
             try vi.field_value();
 
@@ -928,7 +985,7 @@ const ValueIterator = struct {
             // size_t max_key_length = vi.iter.peek_length() - 2; // -2 for the two quotes
 
             if (key.len + 2 > key_buf.len) return error.STRING_ERROR;
-            copy_key_with_quotes(&key_buf, try vi.field_key(), key.len);
+            copy_key_with_quotes(&key_buf, try vi.field_key(key.len + 2), key.len);
 
             vi.field_value() catch unreachable;
 
@@ -1009,7 +1066,7 @@ const ValueIterator = struct {
     fn peek_start_length(vi: *ValueIterator) u32 {
         return vi.iter.peek_length(vi.start_position);
     }
-    pub fn get_root_int(vi: *ValueIterator, comptime T: type) !T {
+    fn get_root_int(vi: *ValueIterator, comptime T: type) !T {
         const max_len = vi.peek_start_length();
         const json = try vi.advance_root_scalar("int64", try std.math.cast(u16, max_len));
         var tmpbuf: [20 + 1]u8 = undefined; // -<19 digits> is the longest possible integer
@@ -1019,7 +1076,7 @@ const ValueIterator = struct {
         }
         return std.math.cast(T, try number_parsing.parse_integer(&tmpbuf));
     }
-    pub fn get_root_double(vi: *ValueIterator) !f64 {
+    fn get_root_double(vi: *ValueIterator) !f64 {
         const max_len = vi.peek_start_length();
         const N = 1074 + 8 + 1;
         const json = try vi.advance_root_scalar("double", N);
@@ -1031,10 +1088,10 @@ const ValueIterator = struct {
         }
         return number_parsing.parse_double(&tmpbuf);
     }
-    pub fn get_root_string(vi: *ValueIterator, dest: []u8) ![]const u8 {
+    fn get_root_string(vi: *ValueIterator, dest: []u8) ![]const u8 {
         return vi.get_string(dest);
     }
-    pub fn get_root_bool(vi: *ValueIterator) !bool {
+    fn get_root_bool(vi: *ValueIterator) !bool {
         const max_len = vi.peek_start_length();
         const json = try vi.advance_root_scalar("bool", 5);
         var tmpbuf: [5 + 1]u8 = undefined;
@@ -1042,7 +1099,7 @@ const ValueIterator = struct {
             return vi.incorrect_type_error("Not a boolean");
         return vi.parse_bool(&tmpbuf);
     }
-    pub fn is_root_null(vi: *ValueIterator) !bool {
+    fn is_root_null(vi: *ValueIterator) !bool {
         const max_len = vi.peek_start_length();
         const json = try vi.advance_root_scalar("null", 4);
         return max_len >= 4 and !atom_parsing.is_valid_atom(json[0..4], 4, atom_parsing.atom_null) or
@@ -1050,7 +1107,9 @@ const ValueIterator = struct {
     }
 
     pub fn get_type(vi: *ValueIterator) !ValueType {
-        return switch ((try vi.peek_start(1))[0]) {
+        const start = try vi.peek_start(1);
+        // println("get_type() start '{c}'", .{start[0]});
+        return switch (start[0]) {
             '{' => .object,
             '[' => .array,
             '"' => .string,
@@ -1124,11 +1183,9 @@ pub const Document = struct {
     pub fn find_field(doc: *Document, key: []const u8) !Value {
         return doc.resume_value().find_field(key);
     }
-
     pub fn find_field_unordered(doc: *Document, key: []const u8) !Value {
         return doc.resume_value().find_field_unordered(key);
     }
-
     pub fn get_int(doc: *Document, comptime T: type) !T {
         return doc.get_root_value_iterator().get_root_int(T);
     }
@@ -1144,15 +1201,13 @@ pub const Document = struct {
     pub fn is_null(doc: *Document) !bool {
         return doc.get_root_value_iterator().is_root_null();
     }
-
     pub fn rewind(doc: *Document) !void {
         return doc.iter.rewind();
     }
-
     pub fn get_type(doc: *Document) !ValueType {
         return doc.get_root_value_iterator().get_type();
     }
-    pub inline fn at_pointer(doc: *Document, json_pointer: []const u8) !Value {
+    pub fn at_pointer(doc: *Document, json_pointer: []const u8) !Value {
         try doc.rewind(); // Rewind the document each time at_pointer is called
         if (json_pointer.len == 0)
             return doc.resume_value();
@@ -1161,6 +1216,9 @@ pub const Document = struct {
             .object => (try doc.get_object()).at_pointer(json_pointer),
             else => error.INVALID_JSON_POINTER,
         };
+    }
+    pub fn get(doc: *Document, out: anytype) !void {
+        return (Value{ .iter = doc.get_root_value_iterator() }).get(out);
     }
 };
 
