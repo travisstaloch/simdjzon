@@ -518,3 +518,25 @@ test "ondemand get struct" {
         }
     }.func);
 }
+
+test "get_string_alloc" {
+    try test_ondemand_doc(
+        \\"asdf"
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            const str = try doc.get_string_alloc(allr);
+            defer allr.free(str);
+            try testing.expectEqualStrings("asdf", str);
+        }
+    }.func);
+    const s = "asdf";
+    const reps = mem.page_size / s.len + 100;
+    const overlong_str = "\"" ++ s ** reps ++  "\"";
+    try test_ondemand_doc(overlong_str
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            const str = doc.get_string_alloc(allr);
+            try testing.expectError(error.CAPACITY, str);
+        }
+    }.func);
+}

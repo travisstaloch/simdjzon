@@ -10,6 +10,9 @@ const number_parsing = @import("number_parsing.zig");
 const string_parsing = @import("string_parsing.zig");
 const atom_parsing = @import("atom_parsing.zig");
 const CharUtils = string_parsing.CharUtils;
+const root = @import("root");
+// TODO: document that this is configurable in root
+const READ_BUF_SIZE = if (@hasDecl(root, "read_buf_size")) root.read_buf_size else mem.page_size;
 
 pub const Value = struct {
     iter: ValueIterator,
@@ -36,6 +39,9 @@ pub const Value = struct {
     }
     pub fn get_string(v: *Value, buf: []u8) ![]const u8 {
         return v.iter.get_string(buf);
+    }
+    pub fn get_string_alloc(v: *Value, allocator: *mem.Allocator) ![]const u8 {
+        return v.iter.get_string_alloc(buf, allocator);
     }
     pub fn get_double(v: *Value) !f64 {
         return v.iter.get_double();
@@ -309,7 +315,7 @@ const Array = struct {
 };
 const TokenIterator = struct {
     src: std.io.StreamSource,
-    buf: [mem.page_size]u8 = undefined,
+    buf: [READ_BUF_SIZE]u8 = undefined,
     /// result of src.read() - number of bytes read from src
     buf_len: u16 = 0,
     /// src index of the start of the buffer.  set to index[0] each src.read()
@@ -331,13 +337,16 @@ const TokenIterator = struct {
     /// len_hint: requested length to be read from src, starting at position
     pub fn peek(ti: *TokenIterator, position: [*]const u32, len_hint: u16) ![*]const u8 {
         if (len_hint > ti.buf.len) return error.CAPACITY;
-        const start = position[0];
+        const start_pos = position[0];
         // println("\nTokenIterator: {} <= start {} end {} < ti.buf_start_pos + len {}", .{ ti.buf_start_pos, start, end, ti.buf_start_pos + ti.buf_len });
-        if (ti.buf_start_pos <= start and start < ti.buf_start_pos + ti.buf_len)
-            return @ptrCast([*]const u8, &ti.buf) + (start - ti.buf_start_pos);
+        if (ti.buf_start_pos <= start_pos and start_pos < ti.buf_start_pos + ti.buf_len) blk: {
+            const offset = start_pos - ti.buf_start_pos;
+            if (offset + len_hint > READ_BUF_SIZE) break :blk;
+            return @ptrCast([*]const u8, &ti.buf) + offset;
+        }
         // println("TokenIterator: seek and read()", .{});
-        try ti.src.seekTo(start);
-        ti.buf_start_pos = start;
+        try ti.src.seekTo(start_pos);
+        ti.buf_start_pos = start_pos;
         ti.buf_len = @truncate(u16, try ti.src.read(&ti.buf));
         return &ti.buf;
     }
@@ -1037,6 +1046,10 @@ const ValueIterator = struct {
     pub fn get_string(vi: *ValueIterator, dest: []u8) ![]const u8 {
         return unescape(try vi.get_raw_json_string(try std.math.cast(u16, dest.len)), dest.ptr);
     }
+    pub fn get_string_alloc(vi: *ValueIterator, allocator: *mem.Allocator) ![]u8 {
+        const start = try vi.get_raw_json_string(1);
+        return string_parsing.parse_string_alloc(start, allocator, READ_BUF_SIZE);
+    }
 
     fn advance_start(vi: *ValueIterator, typ: []const u8, buf_len: u16) ![*]const u8 {
         vi.iter.log.value2(&vi.iter, typ, "", vi.start_position[0], vi.depth);
@@ -1090,6 +1103,9 @@ const ValueIterator = struct {
     }
     fn get_root_string(vi: *ValueIterator, dest: []u8) ![]const u8 {
         return vi.get_string(dest);
+    }
+    fn get_root_string_alloc(vi: *ValueIterator, allocator: *mem.Allocator) ![]u8 {
+        return vi.get_string_alloc(allocator);
     }
     fn get_root_bool(vi: *ValueIterator) !bool {
         const max_len = vi.peek_start_length();
@@ -1191,6 +1207,9 @@ pub const Document = struct {
     }
     pub fn get_string(doc: *Document, buf: []u8) ![]const u8 {
         return doc.get_root_value_iterator().get_root_string(buf);
+    }
+    pub fn get_string_alloc(doc: *Document, allocator: *mem.Allocator) ![]u8 {
+        return doc.get_root_value_iterator().get_root_string_alloc(allocator);
     }
     pub fn get_double(doc: *Document) !f64 {
         return doc.get_root_value_iterator().get_root_double();

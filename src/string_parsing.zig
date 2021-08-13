@@ -2,6 +2,7 @@ const std = @import("std");
 const mem = std.mem;
 usingnamespace @import("vector_types.zig");
 const _mm256_storeu_si256 = @import("llvm_intrinsics.zig")._mm256_storeu_si256;
+const common = @import("common.zig");
 
 const escape_map = [256]u8{
     0, 0, 0,    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 0x0.
@@ -106,16 +107,13 @@ inline fn handle_unicode_codepoint(src_ptr: *[*]const u8, dst_ptr: *[*]u8) bool 
     return offset > 0;
 }
 
-// **
-// * Unescape a string from src to dst, stopping at a final unescaped quote. E.g., if src points at 'joe"', then
-// * dst needs to have four free bytes.
-// *
+/// Unescape a string from src to dst, stopping at a final unescaped quote. E.g., if src points at 'joe"', then
+/// dst needs to have four free bytes.
 pub inline fn parse_string(src_: [*]const u8, dst_: [*]u8) ?[*]u8 {
     var src = src_;
     var dst = dst_;
     while (true) {
         // Copy the next n bytes, and find the backslash and quote in them.
-
         const bs_quote = try BackslashAndQuote.copy_and_find(src, dst);
 
         // std.log.debug("bs_quote {b}", .{bs_quote});
@@ -163,15 +161,76 @@ pub inline fn parse_string(src_: [*]const u8, dst_: [*]u8) ?[*]u8 {
     unreachable;
 }
 
+/// allocates and returns an unescaped a string from src, stopping at a final unescaped quote. 
+/// e.g., if src points at 'joe"', returns 'joe'.
+/// caller owns the memory. 
+pub inline fn parse_string_alloc(src_: [*]const u8, allocator: *mem.Allocator, comptime max_str_len: u16) ![]u8 {
+    var src = src_;
+    var dst_list = std.ArrayListUnmanaged(u8){};
+    try dst_list.ensureTotalCapacity(allocator, BackslashAndQuote.BYTES_PROCESSED);
+    errdefer dst_list.deinit(allocator);
+
+    while (true) {
+        if (dst_list.items.len > max_str_len) return error.CAPACITY;
+        // Copy the next n bytes, and find the backslash and quote in them.
+
+        const bs_quote = try BackslashAndQuote.copy_and_find(src, dst_list.items.ptr + dst_list.items.len);
+
+        // std.log.debug("bs_quote {b}", .{bs_quote});
+        // If the next thing is the end quote, copy and return
+        if (bs_quote.has_quote_first()) {
+            // we encountered quotes first. Move dst to point to quotes and exit
+            // std.log.debug("has_quote_first quote_index {} dst.items.len {}", .{ bs_quote.quote_index(), dst.items.len });
+            // return dst + bs_quote.quote_index();
+            dst_list.items.len += bs_quote.quote_index();
+            return dst_list.toOwnedSlice(allocator);
+        }
+        if (bs_quote.has_backslash()) {
+            //    find out where the backspace is */
+            const bs_dist = bs_quote.backslash_index();
+            const escape_char = src[bs_dist + 1];
+            //    we encountered backslash first. Handle backslash */
+            if (escape_char == 'u') {
+                //  move src/dst up to the start; they will be further adjusted
+                //    within the unicode codepoint handling code. */
+                src += bs_dist;
+                dst_list.items.len += bs_dist;
+                var dst = dst_list.items.ptr + dst_list.items.len;
+                if (!handle_unicode_codepoint(&src, &dst))
+                    return error.STRING_ERROR;
+                dst_list.items.len += try common.ptr_diff(u8, dst, dst_list.items.ptr + dst_list.items.len);
+            } else {
+                //  simple 1:1 conversion. Will eat bs_dist+2 characters in input and
+                //  * write bs_dist+1 characters to output
+                //  * note this may reach beyond the part of the buffer we've actually
+                //  * seen. I think this is ok */
+                const escape_result = escape_map[escape_char];
+                if (escape_result == 0) {
+                    return error.STRING_ERROR; // bogus escape value is an error */
+                }
+                (dst_list.items.ptr + dst_list.items.len)[bs_dist] = escape_result;
+                src += bs_dist + 2;
+                dst_list.items.len += 1;
+            }
+        } else {
+            //   /* they are the same. Since they can't co-occur, it means we
+            //    * encountered neither. */
+            src += BackslashAndQuote.BYTES_PROCESSED;
+            dst_list.items.len += BackslashAndQuote.BYTES_PROCESSED;
+        }
+        try dst_list.ensureUnusedCapacity(allocator, BackslashAndQuote.BYTES_PROCESSED);
+    }
+    //   /* can't be reached */
+    unreachable;
+}
+
 pub const BackslashAndQuote = struct {
     bs_bits: u32,
     quote_bits: u32,
     pub const BYTES_PROCESSED = 32;
 
     pub inline fn copy_and_find(src: [*]const u8, dst: [*]u8) !BackslashAndQuote {
-
         // std.log.debug("nbytes {} s: '{s}'", .{ nbytes, s[0..nbytes] });
-        // try dst.appendSlice(allocator, buf[0..nbytes]);
         const v: u8x32 = src[0..BYTES_PROCESSED].*;
         // store to dest unconditionally - we can overwrite the bits we don't like later
         // v.store(dst);
@@ -182,6 +241,7 @@ pub const BackslashAndQuote = struct {
         const qs = v == @splat(BYTES_PROCESSED, @as(u8, '"'));
         return BackslashAndQuote{ .bs_bits = @ptrCast(*const u32, &bs).*, .quote_bits = @ptrCast(*const u32, &qs).* };
     }
+
     fn has_quote_first(bsq: BackslashAndQuote) bool {
         return ((bsq.bs_bits -% 1) & bsq.quote_bits) != 0;
     }
