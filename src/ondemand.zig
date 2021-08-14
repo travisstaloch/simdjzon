@@ -14,6 +14,10 @@ const root = @import("root");
 // TODO: document that this is configurable in root
 const READ_BUF_SIZE = if (@hasDecl(root, "read_buf_size")) root.read_buf_size else mem.page_size;
 
+const GetOptions = struct {
+    allocator: ?*mem.Allocator = null,
+};
+
 pub const Value = struct {
     iter: ValueIterator,
     pub fn find_field(v: *Value, key: []const u8) !Value {
@@ -37,11 +41,11 @@ pub const Value = struct {
     pub fn get_int(v: *Value, comptime T: type) !T {
         return v.iter.get_int(T);
     }
-    pub fn get_string(v: *Value, buf: []u8) ![]const u8 {
-        return v.iter.get_string(buf);
+    pub fn get_string(v: *Value, comptime T: type, buf: []u8) !T {
+        return v.iter.get_string(T, buf);
     }
-    pub fn get_string_alloc(v: *Value, allocator: *mem.Allocator) ![]const u8 {
-        return v.iter.get_string_alloc(buf, allocator);
+    pub fn get_string_alloc(v: *Value, comptime T: type, allocator: *mem.Allocator) !T {
+        return v.iter.get_string_alloc(T, allocator);
     }
     pub fn get_double(v: *Value) !f64 {
         return v.iter.get_double();
@@ -61,7 +65,7 @@ pub const Value = struct {
         };
     }
 
-    pub fn get(val: *Value, out: anytype) Error!void {
+    pub fn get(val: *Value, out: anytype, options: GetOptions) Error!void {
         const T = @TypeOf(out);
         const info = @typeInfo(T);
         switch (info) {
@@ -78,10 +82,40 @@ pub const Value = struct {
                                 null
                             else blk: {
                                 var x: std.meta.Child(C) = undefined;
-                                try val.get(&x);
+                                try val.get(&x, options);
                                 break :blk x;
                             },
-                            .Array => try val.get(@as([]std.meta.Child(C), out)),
+                            .Array => {
+                                var arr = try val.get_array();
+                                var iter = arr.iterator();
+                                for (out) |*out_ele| {
+                                    var arr_ele = (try iter.next()) orelse break;
+                                    try arr_ele.get(out_ele, options);
+                                }
+                            },
+                            .Pointer => {
+                                if (child_info.Pointer.size == .Slice) {
+                                    if (options.allocator) |allocator| {
+                                        switch (try val.get_type()) {
+                                            .array => {
+                                                var list = std.ArrayListUnmanaged(std.meta.Child(C)){};
+                                                var arr = try val.get_array();
+                                                var iter = arr.iterator();
+                                                while (try iter.next()) |*arr_ele| {
+                                                    try arr_ele.get(try list.addOne(allocator), options);
+                                                }
+                                                out.* = list.toOwnedSlice(allocator);
+                                            },
+                                            .string => out.* = try val.get_string_alloc(C, allocator),
+                                            else => return error.INCORRECT_TYPE,
+                                        }
+                                    } else {
+                                        val.iter.iter.log.err(&val.iter, "slice requires an options.allocator be provided: get(..., .{.allocator = allocator})");
+                                        return error.MEMALLOC;
+                                    }
+                                } else @compileError("unsupported type: " ++ @typeName(T) ++
+                                    ". expecting slice");
+                            },
                             .Struct => {
                                 switch (try val.iter.get_type()) {
                                     .object => {
@@ -90,9 +124,13 @@ pub const Value = struct {
                                             const field_info = @typeInfo(field.field_type);
                                             if (obj.find_field_unordered(field.name)) |*obj_val|
                                                 if (field_info != .Pointer)
-                                                    try obj_val.get(&@field(out, field.name))
-                                                else
-                                                    try obj_val.get(@field(out, field.name))
+                                                    try obj_val.get(&@field(out, field.name), options)
+                                                else {
+                                                    if (options.allocator != null)
+                                                        try obj_val.get(&@field(out, field.name), options)
+                                                    else
+                                                        try obj_val.get(@field(out, field.name), options);
+                                                }
                                             else |_| {}
                                         }
                                     },
@@ -105,15 +143,10 @@ pub const Value = struct {
                     },
                     .Slice => {
                         switch (try val.iter.get_type()) {
-                            .string => _ = try val.get_string(out),
-                            .array => {
-                                var arr = try val.get_array();
-                                var iter = arr.iterator();
-                                for (out) |*out_ele| {
-                                    var arr_ele = (try iter.next()) orelse break;
-                                    try arr_ele.get(out_ele);
-                                }
-                            },
+                            .string => _ = try if (options.allocator) |allocator|
+                                val.get_string_alloc(T, allocator)
+                            else
+                                return error.INCORRECT_TYPE,
                             else => return error.INCORRECT_TYPE,
                         }
                     },
@@ -1047,18 +1080,18 @@ pub const ValueIterator = struct {
             u64int);
     }
 
-    pub fn unescape(src: [*]const u8, dst: [*]u8) ![]const u8 {
+    pub fn unescape(comptime T: type, src: [*]const u8, dst: [*]u8) !T {
         const end = string_parsing.parse_string(src, dst) orelse return error.STRING_ERROR;
         const len = try ptr_diff(u32, end, dst);
-        return dst[0..len];
+        return @as(T, dst[0..len]);
     }
 
-    pub fn get_string(vi: *ValueIterator, dest: []u8) ![]const u8 {
-        return unescape(try vi.get_raw_json_string(try std.math.cast(u16, dest.len)), dest.ptr);
+    pub fn get_string(vi: *ValueIterator, comptime T: type, dest: []u8) !T {
+        return unescape(T, try vi.get_raw_json_string(try std.math.cast(u16, dest.len)), dest.ptr);
     }
-    pub fn get_string_alloc(vi: *ValueIterator, allocator: *mem.Allocator) ![]u8 {
+    pub fn get_string_alloc(vi: *ValueIterator, comptime T: type, allocator: *mem.Allocator) !T {
         const start = try vi.get_raw_json_string(1);
-        return string_parsing.parse_string_alloc(start, allocator, READ_BUF_SIZE);
+        return string_parsing.parse_string_alloc(T, start, allocator, READ_BUF_SIZE);
     }
 
     fn advance_start(vi: *ValueIterator, typ: []const u8, buf_len: u16) ![*]const u8 {
@@ -1111,11 +1144,11 @@ pub const ValueIterator = struct {
         }
         return number_parsing.parse_double(&tmpbuf);
     }
-    fn get_root_string(vi: *ValueIterator, dest: []u8) ![]const u8 {
-        return vi.get_string(dest);
+    fn get_root_string(vi: *ValueIterator, comptime T: type, dest: []u8) !T {
+        return vi.get_string(T, dest);
     }
-    fn get_root_string_alloc(vi: *ValueIterator, allocator: *mem.Allocator) ![]u8 {
-        return vi.get_string_alloc(allocator);
+    fn get_root_string_alloc(vi: *ValueIterator, comptime T: type, allocator: *mem.Allocator) !T {
+        return vi.get_string_alloc(T, allocator);
     }
     fn get_root_bool(vi: *ValueIterator) !bool {
         const max_len = vi.peek_start_length();
@@ -1211,11 +1244,11 @@ pub const Document = struct {
     pub fn get_int(doc: *Document, comptime T: type) !T {
         return doc.get_root_value_iterator().get_root_int(T);
     }
-    pub fn get_string(doc: *Document, buf: []u8) ![]const u8 {
-        return doc.get_root_value_iterator().get_root_string(buf);
+    pub fn get_string(doc: *Document, comptime T: type, buf: []u8) !T {
+        return doc.get_root_value_iterator().get_root_string(T, buf);
     }
-    pub fn get_string_alloc(doc: *Document, allocator: *mem.Allocator) ![]u8 {
-        return doc.get_root_value_iterator().get_root_string_alloc(allocator);
+    pub fn get_string_alloc(doc: *Document, comptime T: type, allocator: *mem.Allocator) !T {
+        return doc.get_root_value_iterator().get_root_string_alloc(T, allocator);
     }
     pub fn get_double(doc: *Document) !f64 {
         return doc.get_root_value_iterator().get_root_double();
@@ -1242,8 +1275,8 @@ pub const Document = struct {
             else => error.INVALID_JSON_POINTER,
         };
     }
-    pub fn get(doc: *Document, out: anytype) !void {
-        return doc.value().get(out);
+    pub fn get(doc: *Document, out: anytype, options: GetOptions) !void {
+        return doc.value().get(out, options);
     }
     pub fn value(doc: *Document) Value {
         return Value{ .iter = doc.get_root_value_iterator() };

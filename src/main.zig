@@ -123,7 +123,7 @@ inline fn recursive_iterate_json(element: anytype, depth: u16, max_depth: u16, s
                 },
             }
         },
-        .string => _ = try element.get_string(string_buf),
+        .string => _ = try element.get_string([]u8, string_buf),
         .bool => _ = try element.get_bool(),
         .nul => if (!(try element.is_null())) return error.INCORRECT_TYPE,
     }

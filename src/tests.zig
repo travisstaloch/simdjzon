@@ -327,7 +327,7 @@ test "ondemand struct iteration types" {
             {
                 var f = (try objit.next(&buf)) orelse return testing.expect(false);
                 try testing.expectEqualStrings("str", buf[0..3]);
-                try testing.expectEqualStrings("strval", try f.value.get_string(&buf));
+                try testing.expectEqualStrings("strval", try f.value.get_string([]u8, &buf));
             }
             {
                 var f = (try objit.next(&buf)) orelse return testing.expect(false);
@@ -400,7 +400,11 @@ test "ondemand array iteration nested" {
                 var it = arr2.iterator();
                 var i: u8 = 0;
                 while (try it.next()) |*e2| {
-                    _ = try e2.get_double();
+                    try testing.expectApproxEqAbs(
+                        @intToFloat(f64, i + 1),
+                        try e2.get_double(),
+                        std.math.f64_epsilon,
+                    );
                     i += 1;
                 }
                 try testing.expectEqual(@as(u8, 4), i);
@@ -431,7 +435,7 @@ test "ondemand root types" {
     , struct {
         fn func(doc: *ondemand.Document) E!void {
             var buf: [6]u8 = undefined;
-            try testing.expectEqualStrings("string", try doc.get_string(&buf));
+            try testing.expectEqualStrings("string", try doc.get_string([]u8, &buf));
         }
     }.func);
     try test_ondemand_doc(
@@ -492,7 +496,7 @@ test "ondemand get struct" {
         fn func(doc: *ondemand.Document) E!void {
             const S = struct { a: u8, b: u8, c: struct { d: u8 } };
             var s: S = undefined;
-            try doc.get(&s);
+            try doc.get(&s, .{});
             try testing.expectEqual(@as(u8, 1), s.a);
             try testing.expectEqual(@as(u8, 2), s.b);
             try testing.expectEqual(@as(u8, 3), s.c.d);
@@ -502,19 +506,25 @@ test "ondemand get struct" {
         \\{"a": {"b": [1,2,3], "c": 3.1415, "d": true, "e": "e-string", "f": null, "g": [4,5,6]}}
     , struct {
         fn func(doc: *ondemand.Document) E!void {
-            const S = struct { a: struct { b: [3]u8, c: f32, d: bool, f: ?u8, g: []u8, e: []u8 } };
-            var s: S = undefined;
-            s.a.g = try allr.alloc(u8, 3);
-            defer allr.free(s.a.g);
-            s.a.e = try allr.alloc(u8, 8);
-            defer allr.free(s.a.e);
-            try doc.get(&s);
-            try testing.expectApproxEqAbs(@as(f32, 3.1416), s.a.c, std.math.f16_epsilon);
-            try testing.expectEqual(true, s.a.d);
-            try testing.expectEqual(@as(?u8, null), s.a.f);
-            try testing.expectEqualSlices(u8, &.{ 1, 2, 3 }, &s.a.b);
-            try testing.expectEqualSlices(u8, &.{ 4, 5, 6 }, s.a.g);
-            try testing.expectEqualStrings("e-string", s.a.e);
+            {
+                const S = struct { a: struct { b: [3]u8, c: f32, d: bool, f: ?u8 } };
+                var s: S = undefined;
+                try doc.get(&s, .{});
+                try testing.expectApproxEqAbs(@as(f32, 3.1416), s.a.c, std.math.f16_epsilon);
+                try testing.expectEqual(true, s.a.d);
+                try testing.expectEqual(@as(?u8, null), s.a.f);
+                try testing.expectEqualSlices(u8, &.{ 1, 2, 3 }, &s.a.b);
+            }
+            {
+                // parse strings or arrays in slices using an allocator
+                const S = struct { a: struct { g: []u8, e: []const u8 } };
+                var s: S = undefined;
+                defer allr.free(s.a.g);
+                defer allr.free(s.a.e);
+                try doc.get(&s, .{ .allocator = allr });
+                try testing.expectEqualSlices(u8, &.{ 4, 5, 6 }, s.a.g);
+                try testing.expectEqualStrings("e-string", s.a.e);
+            }
         }
     }.func);
 }
@@ -524,9 +534,16 @@ test "get_string_alloc" {
         \\"asdf"
     , struct {
         fn func(doc: *ondemand.Document) E!void {
-            const str = try doc.get_string_alloc(allr);
-            defer allr.free(str);
-            try testing.expectEqualStrings("asdf", str);
+            {
+                const str = try doc.get_string_alloc([]u8, allr);
+                defer allr.free(str);
+                try testing.expectEqualStrings("asdf", str);
+            }
+            {
+                const str = try doc.get_string_alloc([]const u8, allr);
+                defer allr.free(str);
+                try testing.expectEqualStrings("asdf", str);
+            }
         }
     }.func);
     const s = "asdf";
@@ -534,7 +551,7 @@ test "get_string_alloc" {
     const overlong_str = "\"" ++ s ** reps ++ "\"";
     try test_ondemand_doc(overlong_str, struct {
         fn func(doc: *ondemand.Document) E!void {
-            const str = doc.get_string_alloc(allr);
+            const str = doc.get_string_alloc([]const u8, allr);
             try testing.expectError(error.CAPACITY, str);
         }
     }.func);
@@ -558,7 +575,7 @@ test "ondemand array iteration nested" {
 }
 
 test "ondemand edge cases" {
-    // This is a sneaky case where TokenIterator.buf could have 'null'
+    // This is a sneaky case where TokenIterator.buf could have 'null' when read only moves ahead by 1
     try test_ondemand_doc(
         \\[nul]
     , struct {

@@ -164,7 +164,7 @@ pub inline fn parse_string(src_: [*]const u8, dst_: [*]u8) ?[*]u8 {
 /// allocates and returns an unescaped a string from src, stopping at a final unescaped quote. 
 /// e.g., if src points at 'joe"', returns 'joe'.
 /// caller owns the memory. 
-pub inline fn parse_string_alloc(src_: [*]const u8, allocator: *mem.Allocator, comptime max_str_len: u16) ![]u8 {
+pub inline fn parse_string_alloc(comptime T: type, src_: [*]const u8, allocator: *mem.Allocator, comptime max_str_len: u16) !T {
     var src = src_;
     var dst_list = std.ArrayListUnmanaged(u8){};
     try dst_list.ensureTotalCapacity(allocator, BackslashAndQuote.BYTES_PROCESSED);
