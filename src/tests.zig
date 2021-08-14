@@ -531,12 +531,28 @@ test "get_string_alloc" {
     }.func);
     const s = "asdf";
     const reps = mem.page_size / s.len + 100;
-    const overlong_str = "\"" ++ s ** reps ++  "\"";
-    try test_ondemand_doc(overlong_str
-    , struct {
+    const overlong_str = "\"" ++ s ** reps ++ "\"";
+    try test_ondemand_doc(overlong_str, struct {
         fn func(doc: *ondemand.Document) E!void {
             const str = doc.get_string_alloc(allr);
             try testing.expectError(error.CAPACITY, str);
+        }
+    }.func);
+}
+
+test "ondemand array iteration nested" {
+    try test_ondemand_doc(
+        \\{"a": [{}, {}] }
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            var buf: [0x10]u8 = undefined;
+            const obj1 = try doc.get_object();
+            var field1 = (try obj1.iterator().next(&buf)) orelse return testing.expect(false);
+            var arr1 = try field1.value.get_array();
+            var it = arr1.iterator();
+            var i: u8 = 0;
+            while (try it.next()) |_| : (i += 1) {}
+            try testing.expectEqual(@as(u8, 2), i);
         }
     }.func);
 }

@@ -51,7 +51,7 @@ fn printable_char(c: u8) u8 {
 
 pub fn line_fmt(log: *Logger, iter: anytype, title_prefix: []const u8, title: []const u8, comptime detail_fmt: []const u8, detail_args: anytype) void {
     var buf: [0x100]u8 = undefined;
-    log.line(iter, title_prefix, title, std.fmt.bufPrint(&buf, detail_fmt, detail_args) catch unreachable);
+    log.line(iter, title_prefix, title, std.fmt.bufPrint(&buf, detail_fmt, detail_args) catch &buf);
 }
 
 // TODO: remove catch unreachables

@@ -125,6 +125,10 @@ pub const Value = struct {
             else => @compileError("unsupported type: " ++ @typeName(T) ++ ". expecting pointer type."),
         }
     }
+
+    pub fn get_type(val: *Value) !ValueType {
+        return val.iter.get_type();
+    }
 };
 
 pub const Field = struct {
@@ -166,6 +170,7 @@ pub const Object = struct {
     pub fn iterator(o: Object) ObjectIterator {
         return ObjectIterator.init(o.iter);
     }
+    // TODO: move these to ValueIterator
     fn start_root(iter: *ValueIterator) !Object {
         _ = try iter.start_root_object();
         return Object{ .iter = iter.* };
@@ -176,6 +181,9 @@ pub const Object = struct {
     }
     fn resume_(iter: *ValueIterator) Object {
         return Object{ .iter = iter.* };
+    }
+    pub fn resume_value(o: Object) Value {
+        return Value{ .iter = o.iter };
     }
 
     pub fn find_field(o: *Object, key: []const u8) !Value {
@@ -252,9 +260,6 @@ const ArrayIterator = struct {
             return Value{ .iter = ai.iter.child() };
         }
         return null;
-    }
-    pub fn get_int(ai: *ArrayIterator, comptime T: type) !T {
-        return ai.iter.get_int(T);
     }
 };
 const Array = struct {
@@ -355,6 +360,7 @@ const TokenIterator = struct {
     }
 };
 pub const Iterator = struct {
+    // TODO make this a pointer or make TokenIterator.read_buf a pointer
     token: TokenIterator,
     parser: *Parser,
     err: Error!void = {},
@@ -362,17 +368,17 @@ pub const Iterator = struct {
     log: Logger = .{ .depth = 0 },
 
     pub fn init(parser: *Parser, src: std.io.StreamSource) Iterator {
-        return .{
+        return Iterator{
             .token = .{ .src = src, .index = parser.structural_indices().ptr, .buf_start_pos = 0 },
             .parser = parser,
             .depth = 1,
         };
     }
 
-    pub fn advance(iter: *Iterator, len: u16) ![*]const u8 {
+    pub fn advance(iter: *Iterator, peek_len: u16) ![*]const u8 {
         defer iter.token.index += 1;
         // print("advance '{s}'\n", .{(try iter.token.peek(iter.token.index, len))[0..len]});
-        return iter.token.peek(iter.token.index, len);
+        return iter.token.peek(iter.token.index, peek_len);
     }
     pub fn peek(iter: *Iterator, index: [*]const u32, len: u16) ![*]const u8 {
         return iter.token.peek(index, len);
@@ -529,9 +535,13 @@ pub const Iterator = struct {
         iter.log.start(iter); // We start again
         iter.depth = 1;
     }
+
+    fn at_eof(iter: Iterator) bool {
+        return iter.token.index == iter.last_document_position();
+    }
 };
 
-const ValueIterator = struct {
+pub const ValueIterator = struct {
     iter: Iterator, // this needs to be a value, not a pointer
     depth: u32,
     start_position: [*]const u32,
@@ -1124,14 +1134,13 @@ const ValueIterator = struct {
 
     pub fn get_type(vi: *ValueIterator) !ValueType {
         const start = try vi.peek_start(1);
-        // println("get_type() start '{c}'", .{start[0]});
         return switch (start[0]) {
             '{' => .object,
             '[' => .array,
             '"' => .string,
             'n' => .nul,
             't', 'f' => .bool,
-            '-', '0', '9' => .number,
+            '-', '0'...'9' => .number,
             else => error.TAPE_ERROR,
         };
     }
@@ -1186,12 +1195,12 @@ pub const Document = struct {
         return doc.resume_value_iterator().at_key(key);
     }
     pub fn get_object(doc: *Document) !Object {
-        var value = doc.get_root_value_iterator();
-        return try Object.start_root(&value);
+        var val = doc.get_root_value_iterator();
+        return try Object.start_root(&val);
     }
     pub fn get_array(doc: *Document) !Array {
-        var value = doc.get_root_value_iterator();
-        return Array.start_root(&value);
+        var val = doc.get_root_value_iterator();
+        return Array.start_root(&val);
     }
     fn resume_value(doc: *Document) Value {
         return Value{ .iter = doc.resume_value_iterator() };
@@ -1237,7 +1246,10 @@ pub const Document = struct {
         };
     }
     pub fn get(doc: *Document, out: anytype) !void {
-        return (Value{ .iter = doc.get_root_value_iterator() }).get(out);
+        return doc.value().get(out);
+    }
+    pub fn value(doc: *Document) Value {
+        return Value{ .iter = doc.get_root_value_iterator() };
     }
 };
 
@@ -1297,9 +1309,8 @@ pub const Parser = struct {
 
     pub fn iterate(p: *Parser) !Document {
         try p.stage1();
-        return Document{
-            .iter = Iterator.init(p, p.src.*),
-        };
+        p.iter = Iterator.init(p, p.src.*);
+        return Document{ .iter = p.iter };
     }
 
     inline fn structural_indices(parser: Parser) []u32 {
