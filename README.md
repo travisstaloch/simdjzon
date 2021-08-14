@@ -5,9 +5,9 @@ This is a port of [simdjson](https://github.com/simdjson/simdjson), a high perfo
 
 
 # requirements
-A CPU with both AVX2 and CLMUL is required (Haswell from 2013 onwards should do for Intel, for AMD a Ryzen/EPYC CPU (Q1 2017) should be sufficient).  Macos is (not yet) supported.
+A CPU with both AVX2 and CLMUL is required (Haswell from 2013 onwards should do for Intel, for AMD a Ryzen/EPYC CPU (Q1 2017) should be sufficient).  
 
-No fallback for unsupported CPUs is provided.
+No fallback for unsupported CPUs is provided (yet).
 
 # usage
 ```console

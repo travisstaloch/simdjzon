@@ -1,15 +1,16 @@
 const std = @import("std");
 const mem = std.mem;
-const main = @import("main.zig");
+const common = @import("common.zig");
 const Ondemand = @import("ondemand.zig");
-const println = main.println;
-const print = main.print;
+const println = common.println;
+const print = common.print;
 usingnamespace @import("llvm_intrinsics.zig");
 
 depth: u8 = 0,
 
 const Logger = @This();
 
+pub const MAX_DEPTH = 30;
 const LOG_EVENT_LEN = 20;
 const LOG_BUFFER_LEN = 30;
 const LOG_SMALL_BUFFER_LEN = 10;
@@ -22,7 +23,7 @@ fn pad_with(comptime s: []const u8, comptime pad_byte: u8, comptime len: u8) [le
 }
 
 fn pad_with_alloc(s: []const u8, pad_byte: u8, len: u8, allocator: *mem.Allocator) []const u8 {
-    var buf = allocator.alloc(u8, len) catch unreachable;
+    var buf = allocator.alloc(u8, len) catch return s;
     std.mem.set(u8, buf, pad_byte);
     std.mem.copy(u8, buf, s[0..std.math.min(s.len, buf.len)]);
     return buf;
@@ -30,7 +31,7 @@ fn pad_with_alloc(s: []const u8, pad_byte: u8, len: u8, allocator: *mem.Allocato
 
 pub fn start(log: *Logger, iter: anytype) void {
     _ = iter;
-    if (main.debug) {
+    if (common.debug) {
         log.depth = 0;
         const event_txt = pad_with("Event", ' ', LOG_EVENT_LEN);
         const buffer_txt = pad_with("Buffer", ' ', LOG_BUFFER_LEN);
@@ -51,18 +52,22 @@ fn printable_char(c: u8) u8 {
 
 pub fn line_fmt(log: *Logger, iter: anytype, title_prefix: []const u8, title: []const u8, comptime detail_fmt: []const u8, detail_args: anytype) void {
     var buf: [0x100]u8 = undefined;
-    log.line(iter, title_prefix, title, std.fmt.bufPrint(&buf, detail_fmt, detail_args) catch &buf);
+    log.line(iter, title_prefix, title, std.fmt.bufPrint(&buf, detail_fmt, detail_args) catch return);
 }
 
-// TODO: remove catch unreachables
 pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []const u8, detail: []const u8) void {
+    if (iter.depth >= Logger.MAX_DEPTH) return;
     var log_buf: [0x100]u8 = undefined;
     var log_buf2: [LOG_BUFFER_LEN]u8 = undefined;
-    if (!main.debug) return;
+    if (!common.debug) return;
 
     var log_fba = std.heap.FixedBufferAllocator.init(&log_buf);
     const depth_padding = pad_with_alloc("", ' ', @intCast(u8, if (log.depth < 0x0f) log.depth * 2 else 0xff), &log_fba.allocator);
-    const titles = std.fmt.allocPrint(&log_fba.allocator, "{s}{s}{s}", .{ depth_padding, title_prefix, title }) catch unreachable;
+    const titles = std.fmt.allocPrint(
+        &log_fba.allocator,
+        "{s}{s}{s}",
+        .{ depth_padding, title_prefix, title },
+    ) catch return;
     const p1 = pad_with_alloc(titles, ' ', LOG_EVENT_LEN, &log_fba.allocator);
     print("| {s} ", .{p1});
     const current_index = if (iter.at_beginning()) null else iter.next_structural() - 1;
@@ -112,7 +117,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
     if (current_index) |ci| {
         print("| {s} ", .{
             pad_with_alloc(
-                std.fmt.bufPrint(&log_buf2, "{}", .{ci[0]}) catch unreachable,
+                std.fmt.bufPrint(&log_buf2, "{}", .{ci[0]}) catch return,
                 ' ',
                 LOG_INDEX_LEN,
                 &log_fba.allocator,
@@ -135,22 +140,22 @@ pub fn value2(log: *Logger, iter: anytype, typ: []const u8, detail: []const u8, 
 
 pub fn start_value(log: *Logger, iter: anytype, typ: []const u8) void {
     log.line(iter, "+", typ, "");
-    if (main.debug) log.depth = sat_add_u8(log.depth, 1);
+    if (common.debug) log.depth = sat_add_u8(log.depth, 1);
 }
 pub fn end_value(log: *Logger, iter: anytype, typ: []const u8) void {
-    if (main.debug) log.depth = sat_sub_u8(log.depth, 1);
+    if (common.debug) log.depth = sat_sub_u8(log.depth, 1);
     log.line(iter, "-", typ, "");
 }
 
 pub fn err(log: *Logger, iter: anytype, err_msg: []const u8) void {
     _ = iter;
     _ = log;
-    if (main.debug) std.log.err("{s}", .{err_msg});
+    if (common.debug) std.log.err("{s}", .{err_msg});
 }
 pub fn err_fmt(log: *Logger, iter: anytype, comptime fmt: []const u8, args: anytype) void {
     _ = iter;
     _ = log;
-    if (main.debug) std.log.err(fmt, args);
+    if (common.debug) std.log.err(fmt, args);
 }
 
 pub fn event(log: *Logger, iter: anytype, typ: []const u8, detail: []const u8, delta: i32, depth_delta: i32) void {

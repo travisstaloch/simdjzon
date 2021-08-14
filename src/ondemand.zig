@@ -256,8 +256,9 @@ const ArrayIterator = struct {
             break :blk try ai.iter.has_next_element();
         };
         if (has_value) {
-            defer ai.iter.skip_child() catch {};
-            return Value{ .iter = ai.iter.child() };
+            const result = Value{ .iter = ai.iter.child() };
+            try ai.iter.skip_child();
+            return result;
         }
         return null;
     }
@@ -352,6 +353,8 @@ const TokenIterator = struct {
         // println("TokenIterator: seek and read()", .{});
         try ti.src.seekTo(start_pos);
         ti.buf_start_pos = start_pos;
+        // not sure that 0xaa is the best value here but it does prevent false positives like [nul]
+        @memset(&ti.buf, 0xaa, ti.buf.len);
         ti.buf_len = @truncate(u16, try ti.src.read(&ti.buf));
         return &ti.buf;
     }
@@ -536,7 +539,7 @@ pub const Iterator = struct {
         iter.depth = 1;
     }
 
-    fn at_eof(iter: Iterator) bool {
+    pub fn at_eof(iter: Iterator) bool {
         return iter.token.index == iter.last_document_position();
     }
 };
@@ -553,9 +556,6 @@ pub const ValueIterator = struct {
             .start_position = start_position,
         };
     }
-    // pub fn at_key(vi: ValueIterator, key: []const u8) Value {
-    //     return doc.resume_value_iterator().at_key(key);
-    // }
     fn parse_null(json: [*]const u8) bool {
         return atom_parsing.is_valid_atom(json, 4, atom_parsing.atom_null) and
             CharUtils.is_structural_or_whitespace(json[4]);
@@ -722,7 +722,7 @@ pub const ValueIterator = struct {
         vi.assert_at_container_start();
         if ((try vi.iter.peek_delta(0, 1))[0] == ']') {
             vi.iter.log.value(&vi.iter, "empty array");
-            _ = try vi.iter.advance(0);
+            _ = try vi.iter.advance(1);
             vi.iter.ascend_to(vi.depth - 1);
             return false;
         }
@@ -1190,9 +1190,6 @@ pub const Document = struct {
     }
     inline fn resume_value_iterator(doc: *Document) ValueIterator {
         return ValueIterator.init(doc.iter, 1, doc.iter.root_checkpoint());
-    }
-    pub fn at_key(doc: *Document, key: []const u8) Value {
-        return doc.resume_value_iterator().at_key(key);
     }
     pub fn get_object(doc: *Document) !Object {
         var val = doc.get_root_value_iterator();

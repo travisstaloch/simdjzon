@@ -556,3 +556,17 @@ test "ondemand array iteration nested" {
         }
     }.func);
 }
+
+test "ondemand edge cases" {
+    // This is a sneaky case where TokenIterator.buf could have 'null'
+    try test_ondemand_doc(
+        \\[nul]
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            const arr = try doc.get_array();
+            var it = arr.iterator();
+            var val = (try it.next()) orelse return testing.expect(false);
+            try testing.expectEqual(false, try val.is_null());
+        }
+    }.func);
+}

@@ -3,14 +3,14 @@ const mem = std.mem;
 usingnamespace @import("vector_types.zig");
 usingnamespace @import("llvm_intrinsics.zig");
 const main = @import("main.zig");
-const Error = main.Error;
-const println = main.println;
 const CharUtils = @import("string_parsing.zig").CharUtils;
 const dom = @import("dom.zig");
 const Iterator = dom.Iterator;
 const TapeBuilder = dom.TapeBuilder;
 const TapeType = dom.TapeType;
 const common = @import("common.zig");
+const Error = common.Error;
+const println = common.println;
 
 fn INVALID_NUMBER(src: [*]const u8) Error {
     _ = src;
@@ -1829,7 +1829,7 @@ pub fn parse_integer(src: [*]const u8) !u64 {
         } else if (src[0] != '1' or i <= std.math.maxInt(i64)) return error.INCORRECT_TYPE;
     }
 
-    return if (negative) (~i + 1) else i;
+    return if (negative) (~i +% 1) else i;
 }
 
 pub fn parse_double(src_: [*]const u8) !f64 {
