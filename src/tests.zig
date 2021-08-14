@@ -255,6 +255,22 @@ test "at_pointer" {
 }
 
 // const ondemand = @import("ondemand.zig");
+test "ondemand get with struct" {
+    const S = struct { a: struct { b: []const u8 } };
+    const input =
+        \\{"a": {"b": "b-string"}}
+    ;
+    var src = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(input) };
+    var parser = try ondemand.Parser.init(&src, allr, "<fba>", .{});
+    defer parser.deinit();
+    var doc = try parser.iterate();
+
+    var s: S = undefined;
+    try doc.get(&s, .{ .allocator = allr });
+    defer allr.free(s.a.b);
+    try testing.expectEqualStrings("b-string", s.a.b);
+}
+
 test "ondemand at_pointer" {
     const input =
         \\{"a": {"b": [1,2,3]}}
