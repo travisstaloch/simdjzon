@@ -171,7 +171,7 @@ pub inline fn parse_string_alloc(comptime T: type, src_: [*]const u8, allocator:
     errdefer dst_list.deinit(allocator);
 
     while (true) {
-        if (dst_list.items.len > max_str_len) return error.CAPACITY;
+        if (dst_list.items.len >= max_str_len) return error.CAPACITY;
         // Copy the next n bytes, and find the backslash and quote in them.
 
         const bs_quote = try BackslashAndQuote.copy_and_find(src, dst_list.items.ptr + dst_list.items.len);

@@ -1494,6 +1494,10 @@ const TapeRef = struct {
         }
         return false;
     }
+
+    pub fn element(tr: TapeRef) Element {
+        return .{ .tape = tr.tape };
+    }
 };
 
 const TapeRefIterator = struct {
@@ -1507,10 +1511,14 @@ const TapeRefIterator = struct {
             .end_idx = tape.after_element() - 1,
         };
     }
-    pub fn next(tri: *TapeRefIterator) ?TapeRef {
+    pub fn next(tri: *TapeRefIterator) ?Element {
         tri.tape.idx += 1;
         tri.tape.idx = tri.tape.after_element();
-        return if (tri.tape.idx >= tri.end_idx) null else tri.tape;
+        return if (tri.tape.idx >= tri.end_idx) null else tri.element();
+    }
+
+    pub fn element(tri: TapeRefIterator) Element {
+        return .{ .tape = tri.tape };
     }
 };
 const Element = struct {
@@ -1568,6 +1576,10 @@ const Element = struct {
                                     else => return error.INCORRECT_TYPE,
                                 }
                             },
+                            .Pointer => if (child_info.Pointer.size == .Slice) {
+                                out.* = try ele.get_string();
+                            } else @compileError("unsupported type: " ++ @typeName(T) ++
+                                ". expecting slice"),
                             else => @compileError("unsupported type: " ++ @typeName(T) ++
                                 ". int, float, bool or optional type."),
                         }

@@ -24,9 +24,9 @@ All 19 tests passed.
 ```zig
 const dom = @import("dom.zig");
 test "get with struct" {
-    const S = struct { a: u8, b: u8, c: struct { d: u8 } };
+    const S = struct { a: u8, b: []const u8, c: struct { d: u8 } };
     const input =
-        \\{"a": 42, "b": 84, "c": {"d": 126}}
+        \\{"a": 42, "b": "b-string", "c": {"d": 126}}
     ;
     var parser = try dom.Parser.initFixedBuffer(allr, input, .{});
     defer parser.deinit();
@@ -34,7 +34,7 @@ test "get with struct" {
     var s: S = undefined;
     try parser.element().get(&s);
     try testing.expectEqual(@as(u8, 42), s.a);
-    try testing.expectEqual(@as(u8, 84), s.b);
+    try testing.expectEqualStrings("b-string", s.b);
     try testing.expectEqual(@as(u8, 126), s.c.d);
 }
 
