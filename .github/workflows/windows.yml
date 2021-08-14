@@ -33,3 +33,4 @@ jobs:
     - run: zig build test
     - run: zig build test -Dstep-size=128
     - run: zig build
+    - run: zig build -Dondemand
