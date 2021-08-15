@@ -164,17 +164,17 @@ pub inline fn parse_string(src_: [*]const u8, dst_: [*]u8) ?[*]u8 {
 /// allocates and returns an unescaped a string from src, stopping at a final unescaped quote. 
 /// e.g., if src points at 'joe"', returns 'joe'.
 /// caller owns the memory. 
-pub inline fn parse_string_alloc(comptime T: type, src_: [*]const u8, allocator: *mem.Allocator, comptime max_str_len: u16) !T {
+pub inline fn parse_string_alloc(comptime T: type, src_: [*]const u8, allocator: *mem.Allocator, str_len: u16) !T {
     var src = src_;
-    var dst_list = std.ArrayListUnmanaged(u8){};
-    try dst_list.ensureTotalCapacity(allocator, BackslashAndQuote.BYTES_PROCESSED);
-    errdefer dst_list.deinit(allocator);
+    var dst_slice = try allocator.alloc(u8, str_len);
+    dst_slice.len = 0;
+    errdefer allocator.free(dst_slice);
 
     while (true) {
-        if (dst_list.items.len >= max_str_len) return error.CAPACITY;
+        if (dst_slice.len >= str_len) return error.CAPACITY;
         // Copy the next n bytes, and find the backslash and quote in them.
 
-        const bs_quote = try BackslashAndQuote.copy_and_find(src, dst_list.items.ptr + dst_list.items.len);
+        const bs_quote = try BackslashAndQuote.copy_and_find(src, dst_slice.ptr + dst_slice.len);
 
         // std.log.debug("bs_quote {b}", .{bs_quote});
         // If the next thing is the end quote, copy and return
@@ -182,8 +182,9 @@ pub inline fn parse_string_alloc(comptime T: type, src_: [*]const u8, allocator:
             // we encountered quotes first. Move dst to point to quotes and exit
             // std.log.debug("has_quote_first quote_index {} dst.items.len {}", .{ bs_quote.quote_index(), dst.items.len });
             // return dst + bs_quote.quote_index();
-            dst_list.items.len += bs_quote.quote_index();
-            return dst_list.toOwnedSlice(allocator);
+            dst_slice.len += bs_quote.quote_index();
+            dst_slice = try allocator.realloc(dst_slice, dst_slice.len);
+            return dst_slice;
         }
         if (bs_quote.has_backslash()) {
             //    find out where the backspace is */
@@ -194,11 +195,11 @@ pub inline fn parse_string_alloc(comptime T: type, src_: [*]const u8, allocator:
                 //  move src/dst up to the start; they will be further adjusted
                 //    within the unicode codepoint handling code. */
                 src += bs_dist;
-                dst_list.items.len += bs_dist;
-                var dst = dst_list.items.ptr + dst_list.items.len;
+                dst_slice.len += bs_dist;
+                var dst = dst_slice.ptr + dst_slice.len;
                 if (!handle_unicode_codepoint(&src, &dst))
                     return error.STRING_ERROR;
-                dst_list.items.len += try common.ptr_diff(u8, dst, dst_list.items.ptr + dst_list.items.len);
+                dst_slice.len += try common.ptr_diff(u8, dst, dst_slice.ptr + dst_slice.len);
             } else {
                 //  simple 1:1 conversion. Will eat bs_dist+2 characters in input and
                 //  * write bs_dist+1 characters to output
@@ -208,17 +209,16 @@ pub inline fn parse_string_alloc(comptime T: type, src_: [*]const u8, allocator:
                 if (escape_result == 0) {
                     return error.STRING_ERROR; // bogus escape value is an error */
                 }
-                (dst_list.items.ptr + dst_list.items.len)[bs_dist] = escape_result;
+                (dst_slice.ptr + dst_slice.len)[bs_dist] = escape_result;
                 src += bs_dist + 2;
-                dst_list.items.len += 1;
+                dst_slice.len += 1;
             }
         } else {
             //   /* they are the same. Since they can't co-occur, it means we
             //    * encountered neither. */
             src += BackslashAndQuote.BYTES_PROCESSED;
-            dst_list.items.len += BackslashAndQuote.BYTES_PROCESSED;
+            dst_slice.len += BackslashAndQuote.BYTES_PROCESSED;
         }
-        try dst_list.ensureUnusedCapacity(allocator, BackslashAndQuote.BYTES_PROCESSED);
     }
     //   /* can't be reached */
     unreachable;

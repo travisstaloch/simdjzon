@@ -603,3 +603,24 @@ test "ondemand edge cases" {
         }
     }.func);
 }
+
+test "ondemand raw_json_token" {
+    try test_ondemand_doc(
+        \\12321323213213213213213213213211223
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            var tok = try doc.raw_json_token();
+            try testing.expectEqualStrings("12321323213213213213213213213211223", tok);
+        }
+    }.func);
+    try test_ondemand_doc(
+        \\{"value":12321323213213213213213213213211223}
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            var obj = try doc.get_object();
+            var val = try obj.find_field("value");
+            const tok = try val.raw_json_token();
+            try testing.expectEqualStrings("12321323213213213213213213213211223", tok);
+        }
+    }.func);
+}
