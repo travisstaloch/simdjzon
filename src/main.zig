@@ -68,10 +68,11 @@ pub fn ondemandMain() !u8 {
     var doc = try parser.iterate();
     // common.debug = true;
     var string_buf: [0x1000]u8 = undefined;
-    const end_index = recursive_iterate_json(&doc, 1, parser.parser.max_depth, &string_buf) catch |err| switch (err) {
+    var end_index: u32 = 0;
+    recursive_iterate_json(&doc, 1, parser.parser.max_depth, &string_buf, &end_index) catch |err| switch (err) {
         // error.EndOfStream => {},
         else => {
-            std.log.err("parse failed. {s}", .{@errorName(err)});
+            std.log.err("{s}:{} parse failed. {s}", .{ parser.parser.filename, end_index, @errorName(err) });
             return 1;
         },
     };
@@ -84,7 +85,7 @@ pub fn ondemandMain() !u8 {
     return 0;
 }
 
-inline fn recursive_iterate_json(element: anytype, depth: u16, max_depth: u16, string_buf: []u8) common.Error!u32 {
+inline fn recursive_iterate_json(element: anytype, depth: u16, max_depth: u16, string_buf: []u8, end_index: *u32) common.Error!void {
     if (depth >= max_depth) return error.DEPTH_ERROR;
     var iter = switch (@TypeOf(element)) {
         *ondemand.Document => element.iter,
@@ -96,18 +97,20 @@ inline fn recursive_iterate_json(element: anytype, depth: u16, max_depth: u16, s
             var arr = try element.get_array();
             var it = arr.iterator();
             while (try it.next()) |*child| {
-                _ = try recursive_iterate_json(child, depth + 1, max_depth, string_buf);
+                try recursive_iterate_json(child, depth + 1, max_depth, string_buf, end_index);
             }
-            return (it.iter.iter.token.index - 1)[0];
+            end_index.* = (it.iter.iter.token.index - 1)[0];
+            return;
         },
         .object => {
             var obj = try element.get_object();
             var it = obj.iterator();
             var key: [0x1000]u8 = undefined;
             while (try it.next(&key)) |*field| {
-                _ = try recursive_iterate_json(&field.value, depth + 1, max_depth, string_buf);
+                try recursive_iterate_json(&field.value, depth + 1, max_depth, string_buf, end_index);
             }
-            return (it.iter.iter.token.index - 1)[0];
+            end_index.* = (it.iter.iter.token.index - 1)[0];
+            return;
         },
         .number => {
             // FIXME: clean this up to match dom behavior of big int values
@@ -129,7 +132,8 @@ inline fn recursive_iterate_json(element: anytype, depth: u16, max_depth: u16, s
         .bool => _ = try element.get_bool(),
         .nul => if (!(try element.is_null())) return error.INCORRECT_TYPE,
     }
-    return (iter.token.index - 1)[0];
+    end_index.* = (iter.token.index - 1)[0];
+    return;
 }
 
 pub fn main() !u8 {

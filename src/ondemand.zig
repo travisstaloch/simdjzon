@@ -588,7 +588,7 @@ pub const ValueIterator = struct {
     }
 
     pub fn is_null(vi: *ValueIterator) !bool {
-        return parse_null(try vi.advance_non_root_scalar("null", 4));
+        return parse_null(try vi.advance_non_root_scalar("null", 5));
     }
     fn is_at_start(vi: ValueIterator) bool {
         return vi.iter.token.index == vi.start_position;
@@ -1109,7 +1109,7 @@ pub const ValueIterator = struct {
         return number_parsing.parse_double(try vi.advance_non_root_scalar("double", 40));
     }
     pub fn get_bool(vi: *ValueIterator) !bool {
-        return vi.parse_bool(try vi.advance_non_root_scalar("bool", 5));
+        return vi.parse_bool(try vi.advance_non_root_scalar("bool", 6));
     }
     fn peek_start_length(vi: *ValueIterator) u32 {
         return Iterator.peek_length(vi.start_position);
