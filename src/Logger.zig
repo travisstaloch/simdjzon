@@ -77,7 +77,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
     const content = blk: {
         if (current_index) |ci| {
             if (is_ondemand) {
-                var len = std.math.min(iter.token.buf_len, log_buf2.len);
+                var len = std.math.min(iter.parser.read_buf_len, log_buf2.len);
                 const ptr = iter.peek(ci, len) catch break :blk null;
                 mem.copy(u8, &log_buf2, ptr[0..len]);
             }
@@ -96,7 +96,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
     print("| {s} ", .{content});
     const next_content = blk: {
         if (is_ondemand) {
-            const len = std.math.min(iter.token.buf_len, log_buf2.len);
+            const len = std.math.min(iter.parser.read_buf_len, log_buf2.len);
             const ptr = iter.peek(next_index, len) catch break :blk null;
             mem.copy(u8, &log_buf2, ptr[0..len]);
         }

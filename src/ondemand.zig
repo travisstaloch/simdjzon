@@ -12,7 +12,12 @@ const atom_parsing = @import("atom_parsing.zig");
 const CharUtils = string_parsing.CharUtils;
 const root = @import("root");
 // TODO: document that this is configurable in root
-const READ_BUF_SIZE = if (@hasDecl(root, "read_buf_size")) root.read_buf_size else mem.page_size;
+pub const READ_BUF_SIZE = if (@hasDecl(root, "read_buf_size"))
+    root.read_buf_size
+else if (std.builtin.is_test)
+    mem.page_size
+else
+    unreachable;
 
 const GetOptions = struct {
     allocator: ?*mem.Allocator = null,
@@ -353,17 +358,11 @@ const Array = struct {
     }
 };
 const TokenIterator = struct {
-    src: std.io.StreamSource,
-    buf: [READ_BUF_SIZE]u8 = undefined,
-    /// result of src.read() - number of bytes read from src
-    buf_len: u16 = 0,
-    /// src index of the start of the buffer.  set to index[0] each src.read()
-    buf_start_pos: u32,
     /// src index
     index: [*]const u32,
 
-    pub fn peek_delta(ti: *TokenIterator, delta: i32, len: u16) ![*]const u8 {
-        return ti.peek(
+    pub fn peek_delta(ti: *TokenIterator, parser: *Parser, delta: i32, len: u16) ![*]const u8 {
+        return parser.peek(
             if (delta < 0)
                 ti.index - @intCast(u32, -delta)
             else
@@ -372,40 +371,21 @@ const TokenIterator = struct {
         );
     }
 
-    /// position: pointer to a src position
-    /// len_hint: requested length to be read from src, starting at position
-    pub fn peek(ti: *TokenIterator, position: [*]const u32, len_hint: u16) ![*]const u8 {
-        if (len_hint > ti.buf.len) return error.CAPACITY;
-        const start_pos = position[0];
-        // println("\nTokenIterator: {} <= start {} end {} < ti.buf_start_pos + len {}", .{ ti.buf_start_pos, start, end, ti.buf_start_pos + ti.buf_len });
-        if (ti.buf_start_pos <= start_pos and start_pos < ti.buf_start_pos + ti.buf_len) blk: {
-            const offset = start_pos - ti.buf_start_pos;
-            if (offset + len_hint > READ_BUF_SIZE) break :blk;
-            return @ptrCast([*]const u8, &ti.buf) + offset;
-        }
-        // println("TokenIterator: seek and read()", .{});
-        try ti.src.seekTo(start_pos);
-        ti.buf_start_pos = start_pos;
-        // not sure that 0xaa is the best value here but it does prevent false positives like [nul]
-        @memset(&ti.buf, 0xaa, ti.buf.len);
-        ti.buf_len = @truncate(u16, try ti.src.read(&ti.buf));
-        return &ti.buf;
-    }
     pub fn peek_length(_: *TokenIterator, position: [*]const u32) u32 {
         return (position + 1)[0] - position[0];
     }
 };
 pub const Iterator = struct {
-    // TODO make this a pointer or make TokenIterator.read_buf a pointer
     token: TokenIterator,
     parser: *Parser,
     err: Error!void = {},
     depth: u32,
+    // TODO: move log to parser
     log: Logger = .{ .depth = 0 },
 
-    pub fn init(parser: *Parser, src: std.io.StreamSource) Iterator {
+    pub fn init(parser: *Parser) Iterator {
         return Iterator{
-            .token = .{ .src = src, .index = parser.structural_indices().ptr, .buf_start_pos = 0 },
+            .token = .{ .index = parser.structural_indices().ptr },
             .parser = parser,
             .depth = 1,
         };
@@ -414,13 +394,16 @@ pub const Iterator = struct {
     pub fn advance(iter: *Iterator, peek_len: u16) ![*]const u8 {
         defer iter.token.index += 1;
         // print("advance '{s}'\n", .{(try iter.token.peek(iter.token.index, len))[0..len]});
-        return iter.token.peek(iter.token.index, peek_len);
+        return iter.parser.peek(iter.token.index, peek_len);
     }
     pub fn peek(iter: *Iterator, index: [*]const u32, len: u16) ![*]const u8 {
-        return iter.token.peek(index, len);
+        return iter.parser.peek(index, len);
+    }
+    pub fn peek_last(iter: *Iterator) ![*]const u8 {
+        return iter.parser.peek(iter.last_document_position(), 1);
     }
     pub fn peek_delta(iter: *Iterator, delta: i32, len: u16) ![*]const u8 {
-        return iter.token.peek_delta(delta, len);
+        return iter.token.peek_delta(iter.parser, delta, len);
     }
     pub fn peek_length(iter: *Iterator, position: [*]const u32) u32 {
         return iter.token.peek_length(position);
@@ -434,10 +417,6 @@ pub const Iterator = struct {
         const result = iter.parser.structural_indices().ptr + (n_structural_indexes - 1);
         // println("tail.items {any} n_structural_indexes {} result {}\n", .{ iter.parser.structural_indices(), n_structural_indexes, result[0] });
         return result;
-    }
-
-    pub fn peek_last(iter: *Iterator) ![*]const u8 {
-        return iter.token.peek(iter.last_document_position(), 1);
     }
     pub fn root_checkpoint(iter: Iterator) [*]const u32 {
         return iter.parser.structural_indices().ptr;
@@ -784,7 +763,7 @@ pub const ValueIterator = struct {
 
     fn field_key(vi: *ValueIterator, key_len: usize) ![*]const u8 {
         vi.assert_at_next();
-        var key = try vi.iter.advance(try std.math.cast(u16, key_len));
+        var key = try vi.iter.advance(try std.math.cast(u16, std.math.min(READ_BUF_SIZE, key_len)));
         if (key[0] != '"')
             return vi.iter.report_error(error.TAPE_ERROR, "Object key is not a string");
         return key;
@@ -1039,7 +1018,7 @@ pub const ValueIterator = struct {
             if (key.len + 2 > key_buf.len) return error.STRING_ERROR;
             copy_key_with_quotes(&key_buf, try vi.field_key(key.len + 2), key.len);
 
-            vi.field_value() catch unreachable;
+            try vi.field_value();
 
             // If it matches, stop and return
             // We could do it this way if we wanted to allow arbitrary
@@ -1087,7 +1066,7 @@ pub const ValueIterator = struct {
     }
 
     pub fn get_string(vi: *ValueIterator, comptime T: type, dest: []u8) !T {
-        return unescape(T, try vi.get_raw_json_string(try std.math.cast(u16, dest.len)), dest.ptr);
+        return unescape(T, try vi.get_raw_json_string(try std.math.cast(u16, std.math.min(READ_BUF_SIZE, dest.len))), dest.ptr);
     }
     pub fn get_string_alloc(vi: *ValueIterator, comptime T: type, allocator: *mem.Allocator) !T {
         const start = try vi.get_raw_json_string(1);
@@ -1134,7 +1113,7 @@ pub const ValueIterator = struct {
     }
     fn get_root_double(vi: *ValueIterator) !f64 {
         const max_len = vi.peek_start_length();
-        const N = 1074 + 8 + 1;
+        const N = comptime std.math.min(1074 + 8 + 1, READ_BUF_SIZE);
         const json = try vi.advance_root_scalar("double", N);
         // Per https://www.exploringbinary.com/maximum-number-of-decimal-digits-in-binary-floating-point-numbers/, 1074 is the maximum number of significant fractional digits. Add 8 more digits for the biggest number: -0.<fraction>e-308.
         var tmpbuf: [N]u8 = undefined;
@@ -1286,8 +1265,12 @@ pub const Document = struct {
 pub const Parser = struct {
     parser: dom.Parser,
     src: *std.io.StreamSource,
-    iter: Iterator,
     end_pos: u32,
+    read_buf: [READ_BUF_SIZE]u8 = undefined,
+    /// result of src.read() - number of bytes read from src
+    read_buf_len: u16 = 0,
+    /// src index of the start of the buffer.  set to index[0] each src.read()
+    read_buf_start_pos: u32,
 
     pub fn init(src: *std.io.StreamSource, allocator: *mem.Allocator, filename: []const u8, options: dom.Parser.Options) !Parser {
         var result = Parser{
@@ -1300,8 +1283,9 @@ pub const Parser = struct {
                 .max_depth = options.max_depth,
             },
             .src = src,
-            .iter = undefined,
             .end_pos = try std.math.cast(u32, try src.getEndPos()),
+            .read_buf_start_pos = 0,
+            .read_buf_len = 0,
         };
         const capacity = result.end_pos;
         const max_structures = ROUNDUP_N(capacity, 64) + 2 + 7;
@@ -1339,11 +1323,36 @@ pub const Parser = struct {
 
     pub fn iterate(p: *Parser) !Document {
         try p.stage1();
-        p.iter = Iterator.init(p, p.src.*);
-        return Document{ .iter = p.iter };
+        const iter = Iterator.init(p);
+        return Document{ .iter = iter };
     }
 
     inline fn structural_indices(parser: Parser) []u32 {
         return parser.parser.indexer.bit_indexer.tail.items;
+    }
+
+    /// position: pointer to a src position
+    /// len_hint: requested length to be read from src, starting at position
+    pub fn peek(
+        parser: *Parser,
+        position: [*]const u32,
+        len_hint: u16,
+    ) ![*]const u8 {
+        // println("peek() len_hint {} READ_BUF_SIZE {}", .{ len_hint, READ_BUF_SIZE });
+        if (len_hint > READ_BUF_SIZE) return error.CAPACITY;
+        const start_pos = position[0];
+        // println("\nTokenIterator: {} <= start {} end {} < read_buf_start_pos + len {}", .{ read_buf_start_pos, start, end, read_buf_start_pos + read_buf_len });
+        if (parser.read_buf_start_pos <= start_pos and start_pos < parser.read_buf_start_pos + parser.read_buf_len) blk: {
+            const offset = start_pos - parser.read_buf_start_pos;
+            if (offset + len_hint > READ_BUF_SIZE) break :blk;
+            return @ptrCast([*]const u8, &parser.read_buf) + offset;
+        }
+        // println("TokenIterator: seek and read()", .{});
+        try parser.src.seekTo(start_pos);
+        parser.read_buf_start_pos = start_pos;
+        // not sure that 0xaa is the best value here but it does prevent false positives like [nul]
+        @memset(&parser.read_buf, 0xaa, READ_BUF_SIZE);
+        parser.read_buf_len = @truncate(u16, try parser.src.read(&parser.read_buf));
+        return &parser.read_buf;
     }
 };

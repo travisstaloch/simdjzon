@@ -563,7 +563,7 @@ test "get_string_alloc" {
         }
     }.func);
     const s = "asdf";
-    const reps = mem.page_size / s.len + 100;
+    const reps = ondemand.READ_BUF_SIZE / s.len + 100;
     const overlong_str = "\"" ++ s ** reps ++ "\"";
     try test_ondemand_doc(overlong_str, struct {
         fn func(doc: *ondemand.Document) E!void {

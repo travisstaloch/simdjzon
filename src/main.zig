@@ -7,6 +7,7 @@ const simdjzon = @import("simdjzon.zig");
 const dom = simdjzon.dom;
 const ondemand = simdjzon.ondemand;
 pub const step_size = build_options.step_size;
+pub const read_buf_size = build_options.ondemand_read_size;
 
 pub fn domMain() !u8 {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -42,6 +43,7 @@ pub fn ondemandMain() !u8 {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = &arena.allocator;
+    // const allocator = std.heap.c_allocator;
     var parser: ondemand.Parser = undefined;
     defer if (parser.src.* == .file) parser.src.file.close();
 
