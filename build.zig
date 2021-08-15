@@ -1,13 +1,13 @@
 const std = @import("std");
 
-fn setup(step: *std.build.LibExeObjStep, mode: std.builtin.Mode, target: anytype, step_size: u8, ondemand: bool, ondemand_read_size: u16) void {
+fn setup(step: *std.build.LibExeObjStep, mode: std.builtin.Mode, target: anytype, step_128: bool, ondemand: bool, ondemand_read_cap: u16) void {
     step.addCSourceFile("src/utils.c", &[_][]const u8{ "-Wall", "-Wextra", "-Werror", "-O3" });
     step.setTarget(target);
     step.linkLibC();
     step.setBuildMode(mode);
-    step.addBuildOption(u8, "step_size", step_size);
+    step.addBuildOption(bool, "step_128", step_128);
     step.addBuildOption(bool, "ondemand", ondemand);
-    step.addBuildOption(u16, "ondemand_read_size", ondemand_read_size);
+    step.addBuildOption(u16, "ondemand_read_cap", ondemand_read_cap);
 }
 
 pub fn build(b: *std.build.Builder) void {
@@ -16,12 +16,11 @@ pub fn build(b: *std.build.Builder) void {
     const mode = b.standardReleaseOptions();
     const target = b.standardTargetOptions(.{});
 
-    // TODO change this to a bool: step-128
-    const step_size = b.option(
-        u8,
-        "step-size",
-        "how many bytes of input to process per StructuralIndexer step.  must be either 64 or 128",
-    ) orelse 64;
+    const step_128 = b.option(
+        bool,
+        "step-128",
+        "process 128 bytes of input per StructuralIndexer step.  defaults to 64 if this flag is not present.  ",
+    ) orelse false;
 
     const ondemand = b.option(
         bool,
@@ -29,25 +28,25 @@ pub fn build(b: *std.build.Builder) void {
         "use the ondemand parser for validation",
     ) orelse false;
 
-    const ondemand_read_size = b.option(
+    const ondemand_read_cap = b.option(
         u16,
-        "ondemand-read-size",
-        "the size of the ondemand read buffer. defaults to 4096 (4 Kb)",
+        "ondemand-read-cap",
+        "the capacity of the ondemand read buffer. defaults to 4096 (4 Kb)",
     ) orelse 4096;
 
     const lib = b.addStaticLibrary("simdjzon", "src/simdjzon.zig");
-    setup(lib, mode, target, step_size, ondemand, ondemand_read_size);
+    setup(lib, mode, target, step_128, ondemand, ondemand_read_cap);
     lib.install();
 
     var main_tests = b.addTest("src/tests.zig");
-    setup(main_tests, mode, target, step_size, ondemand, ondemand_read_size);
+    setup(main_tests, mode, target, step_128, ondemand, ondemand_read_cap);
     // main_tests.setFilter("ondemand array iteration");
 
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&main_tests.step);
 
     const exe = b.addExecutable("simdjzon", "src/main.zig");
-    setup(exe, mode, target, step_size, ondemand, ondemand_read_size);
+    setup(exe, mode, target, step_128, ondemand, ondemand_read_cap);
     exe.install();
 
     const run_cmd = exe.run();

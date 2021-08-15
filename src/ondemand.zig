@@ -12,8 +12,8 @@ const atom_parsing = @import("atom_parsing.zig");
 const CharUtils = string_parsing.CharUtils;
 const root = @import("root");
 // TODO: document that this is configurable in root
-pub const READ_BUF_SIZE = if (@hasDecl(root, "read_buf_size"))
-    root.read_buf_size
+pub const READ_BUF_CAP = if (@hasDecl(root, "read_buf_cap"))
+    root.read_buf_cap
 else if (std.builtin.is_test)
     mem.page_size
 else
@@ -115,7 +115,7 @@ pub const Value = struct {
                                             else => return error.INCORRECT_TYPE,
                                         }
                                     } else {
-                                        val.iter.iter.log.err(&val.iter, "slice requires an options.allocator be provided: get(..., .{.allocator = allocator})");
+                                        val.iter.iter.parser.log.err(&val.iter, "slice requires an options.allocator be provided: get(..., .{.allocator = allocator})");
                                         return error.MEMALLOC;
                                     }
                                 } else @compileError("unsupported type: " ++ @typeName(T) ++
@@ -386,8 +386,6 @@ pub const Iterator = struct {
     parser: *Parser,
     err: Error!void = {},
     depth: u32,
-    // TODO: move log to parser
-    log: Logger = .{ .depth = 0 },
 
     pub fn init(parser: *Parser) Iterator {
         return Iterator{
@@ -440,22 +438,22 @@ pub const Iterator = struct {
             // For the first open array/object in a value, we've already incremented depth, so keep it the same
             // We never stop at colon, but if we did, it wouldn't affect depth
             '[', '{', ':' => {
-                iter.log.start_value(iter, "skip");
+                iter.parser.log.start_value(iter, "skip");
             },
             // If there is a comma, we have just finished a value in an array/object, and need to get back in
             ',' => {
-                iter.log.value(iter, "skip");
+                iter.parser.log.value(iter, "skip");
             },
             // ] or } means we just finished a value and need to jump out of the array/object
             ']', '}' => {
-                iter.log.end_value(iter, "skip");
+                iter.parser.log.end_value(iter, "skip");
                 iter.depth -= 1;
                 if (iter.depth <= parent_depth) return;
             },
             // Anything else must be a scalar value
             else => {
                 // For the first scalar, we will have incremented depth already, so we decrement it here.
-                iter.log.value(iter, "skip");
+                iter.parser.log.value(iter, "skip");
                 iter.depth -= 1;
                 if (iter.depth <= parent_depth) return;
             },
@@ -467,7 +465,7 @@ pub const Iterator = struct {
         while (iter.token.index[0] <= end_idx) {
             switch ((try iter.advance(1))[0]) {
                 '[', '{' => {
-                    iter.log.start_value(iter, "skip");
+                    iter.parser.log.start_value(iter, "skip");
                     iter.depth += 1;
                 },
                 // TODO consider whether matching braces is a requirement: if non-matching braces indicates
@@ -476,12 +474,12 @@ pub const Iterator = struct {
                 // looking at the right values."
                 // PERF TODO we can eliminate the switch here with a lookup of how much to add to depth
                 ']', '}' => {
-                    iter.log.end_value(iter, "skip");
+                    iter.parser.log.end_value(iter, "skip");
                     iter.depth -= 1;
                     if (iter.depth <= parent_depth) return;
                 },
                 else => {
-                    iter.log.value(iter, "skip");
+                    iter.parser.log.value(iter, "skip");
                 },
             }
         }
@@ -493,7 +491,7 @@ pub const Iterator = struct {
         _ = message;
         _ = iter;
         assert(err != error.UNINITIALIZED and err != error.INCORRECT_TYPE and err != error.NO_SUCH_FIELD);
-        iter.log.err(iter, message);
+        iter.parser.log.err(iter, message);
 
         return err;
     }
@@ -553,7 +551,7 @@ pub const Iterator = struct {
 
     pub fn rewind(iter: *Iterator) !void {
         iter.token.index = iter.parser.structural_indices().ptr;
-        iter.log.start(iter); // We start again
+        iter.parser.log.start(iter); // We start again
         iter.depth = 1;
     }
 
@@ -620,7 +618,7 @@ pub const ValueIterator = struct {
         vi.depth = parent_depth;
     }
     fn advance_non_root_scalar(vi: *ValueIterator, typ: []const u8, peek_len: u16) ![*]const u8 {
-        vi.iter.log.value2(&vi.iter, typ, "", vi.start_position[0], vi.depth);
+        vi.iter.parser.log.value2(&vi.iter, typ, "", vi.start_position[0], vi.depth);
         if (!vi.is_at_start())
             return vi.peek_start(peek_len);
 
@@ -630,7 +628,7 @@ pub const ValueIterator = struct {
         return result;
     }
     fn advance_root_scalar(vi: *ValueIterator, typ: []const u8, peek_len: u16) ![*]const u8 {
-        vi.iter.log.value2(&vi.iter, typ, "", vi.start_position[0], vi.depth);
+        vi.iter.parser.log.value2(&vi.iter, typ, "", vi.start_position[0], vi.depth);
         if (!vi.is_at_start())
             return vi.peek_start(peek_len);
         vi.assert_at_root();
@@ -651,7 +649,7 @@ pub const ValueIterator = struct {
         vi.assert_at_next();
         switch ((try vi.iter.advance(1))[0]) {
             '}' => {
-                vi.iter.log.end_value(&vi.iter, "object");
+                vi.iter.parser.log.end_value(&vi.iter, "object");
                 vi.iter.ascend_to(vi.depth - 1);
                 return false;
             },
@@ -664,7 +662,7 @@ pub const ValueIterator = struct {
         vi.assert_at_next();
         switch ((try vi.iter.advance(1))[0]) {
             ']' => {
-                vi.iter.log.end_value(&vi.iter, "array");
+                vi.iter.parser.log.end_value(&vi.iter, "array");
                 vi.iter.ascend_to(vi.depth - 1);
                 return false;
             },
@@ -690,7 +688,7 @@ pub const ValueIterator = struct {
         return result;
     }
     fn advance_container_start(vi: *ValueIterator, typ: []const u8, peek_len: u16) ![*]const u8 {
-        vi.iter.log.line_fmt(&vi.iter, "", typ, "start pos {} depth {}", .{ vi.start_position[0], vi.depth });
+        vi.iter.parser.log.line_fmt(&vi.iter, "", typ, "start pos {} depth {}", .{ vi.start_position[0], vi.depth });
 
         // If we're not at the position anymore, we don't want to advance the cursor.
         if (!vi.is_at_start()) {
@@ -706,7 +704,7 @@ pub const ValueIterator = struct {
     }
     fn incorrect_type_error(vi: *ValueIterator, message: []const u8) Error {
         _ = message;
-        vi.iter.log.err_fmt(&vi.iter, "{s}.  start_position {} depth {}", .{ message, vi.start_position[0], vi.depth });
+        vi.iter.parser.log.err_fmt(&vi.iter, "{s}.  start_position {} depth {}", .{ message, vi.start_position[0], vi.depth });
         return error.INCORRECT_TYPE;
     }
     fn assert_at_container_start(vi: ValueIterator) void {
@@ -724,12 +722,12 @@ pub const ValueIterator = struct {
     fn started_object(vi: *ValueIterator) !bool {
         vi.assert_at_container_start();
         if ((try vi.iter.peek_delta(0, 1))[0] == '}') {
-            vi.iter.log.value(&vi.iter, "empty object");
+            vi.iter.parser.log.value(&vi.iter, "empty object");
             _ = try vi.iter.advance(0);
             vi.iter.ascend_to(vi.depth - 1);
             return false;
         }
-        vi.iter.log.start_value(&vi.iter, "object");
+        vi.iter.parser.log.start_value(&vi.iter, "object");
         // #ifdef SIMDJSON_DEVELOPMENT_CHECKS
         //   vi.iter.set_start_position(_depth, _start_position);
         // #endif
@@ -739,12 +737,12 @@ pub const ValueIterator = struct {
     fn started_array(vi: *ValueIterator) !bool {
         vi.assert_at_container_start();
         if ((try vi.iter.peek_delta(0, 1))[0] == ']') {
-            vi.iter.log.value(&vi.iter, "empty array");
+            vi.iter.parser.log.value(&vi.iter, "empty array");
             _ = try vi.iter.advance(1);
             vi.iter.ascend_to(vi.depth - 1);
             return false;
         }
-        vi.iter.log.start_value(&vi.iter, "array");
+        vi.iter.parser.log.start_value(&vi.iter, "array");
 
         vi.iter.descend_to(vi.depth + 1);
         // #ifdef SIMDJSON_DEVELOPMENT_CHECKS
@@ -770,7 +768,7 @@ pub const ValueIterator = struct {
     fn field_key(vi: *ValueIterator) ![*]const u8 {
         vi.assert_at_next();
         var key = try vi.iter.advance(try std.math.cast(u16, std.math.min(
-            READ_BUF_SIZE,
+            READ_BUF_CAP,
             vi.peek_start_length(),
         )));
         if (key[0] != '"')
@@ -888,12 +886,12 @@ pub const ValueIterator = struct {
             // character and being longer than the number of bytes remaining in the JSON
             // input).
             if (unsafe_is_equal(&key_buf, key)) {
-                vi.iter.log.event(&vi.iter, "match ", key, -2, 0);
+                vi.iter.parser.log.event(&vi.iter, "match ", key, -2, 0);
                 return true;
             }
 
             // No match: skip the value and see if , or } is next
-            vi.iter.log.event(&vi.iter, "no match ", key, -2, 0);
+            vi.iter.parser.log.event(&vi.iter, "no match ", key, -2, 0);
             try vi.skip_child(); // Skip the value entirely
             has_value = try vi.has_next_field();
         }
@@ -1000,12 +998,12 @@ pub const ValueIterator = struct {
             // character and being longer than the number of bytes remaining in the JSON
             // input).
             if (unsafe_is_equal(&key_buf, key)) {
-                vi.iter.log.event(&vi.iter, "match ", key, -2, 0);
+                vi.iter.parser.log.event(&vi.iter, "match ", key, -2, 0);
                 return true;
             }
 
             // No match: skip the value and see if , or } is next
-            vi.iter.log.event(&vi.iter, "no match ", key, -2, 0);
+            vi.iter.parser.log.event(&vi.iter, "no match ", key, -2, 0);
             try vi.skip_child();
             has_value = try vi.has_next_field();
         }
@@ -1038,12 +1036,12 @@ pub const ValueIterator = struct {
             // character and being longer than the number of bytes remaining in the JSON
             // input).
             if (unsafe_is_equal(&key_buf, key)) {
-                vi.iter.log.event(&vi.iter, "match ", key, -2, 0);
+                vi.iter.parser.log.event(&vi.iter, "match ", key, -2, 0);
                 return true;
             }
 
             // No match: skip the value and see if , or } is next
-            vi.iter.log.event(&vi.iter, "no match ", key, -2, 0);
+            vi.iter.parser.log.event(&vi.iter, "no match ", key, -2, 0);
             try vi.skip_child();
             has_value = try vi.has_next_field();
         }
@@ -1076,18 +1074,18 @@ pub const ValueIterator = struct {
 
     pub fn get_string(vi: *ValueIterator, comptime T: type, dest: []u8) !T {
         if (dest.len + 2 < vi.peek_start_length()) return error.CAPACITY;
-        const peek_len = try std.math.cast(u16, std.math.min(READ_BUF_SIZE, dest.len));
+        const peek_len = try std.math.cast(u16, std.math.min(READ_BUF_CAP, dest.len));
         return unescape(T, try vi.get_raw_json_string(peek_len), dest.ptr);
     }
     pub fn get_string_alloc(vi: *ValueIterator, comptime T: type, allocator: *mem.Allocator) !T {
         const str_len = try std.math.cast(u16, vi.peek_start_length());
-        if (str_len + 2 > READ_BUF_SIZE) return error.CAPACITY;
+        if (str_len + 2 > READ_BUF_CAP) return error.CAPACITY;
         const start = try vi.get_raw_json_string(str_len);
         return string_parsing.parse_string_alloc(T, start, allocator, str_len);
     }
 
     fn advance_start(vi: *ValueIterator, typ: []const u8, peek_len: u16) ![*]const u8 {
-        vi.iter.log.value2(&vi.iter, typ, "", vi.start_position[0], vi.depth);
+        vi.iter.parser.log.value2(&vi.iter, typ, "", vi.start_position[0], vi.depth);
         // If we're not at the position anymore, we don't want to advance the cursor.
         if (!vi.is_at_start()) return vi.peek_start(peek_len);
 
@@ -1119,19 +1117,19 @@ pub const ValueIterator = struct {
         const json = try vi.advance_root_scalar("int64", try std.math.cast(u16, max_len));
         var tmpbuf: [20 + 1]u8 = undefined; // -<19 digits> is the longest possible integer
         if (!Iterator.copy_to_buffer(json, max_len, tmpbuf.len, &tmpbuf)) {
-            vi.iter.log.err_fmt(&vi.iter, "Root number more than 20 characters. start_position {} depth {}", .{ vi.start_position[0], vi.depth });
+            vi.iter.parser.log.err_fmt(&vi.iter, "Root number more than 20 characters. start_position {} depth {}", .{ vi.start_position[0], vi.depth });
             return error.NUMBER_ERROR;
         }
         return std.math.cast(T, try number_parsing.parse_integer(&tmpbuf));
     }
     fn get_root_double(vi: *ValueIterator) !f64 {
         const max_len = vi.peek_start_length();
-        const N = comptime std.math.min(1074 + 8 + 1, READ_BUF_SIZE);
+        const N = comptime std.math.min(1074 + 8 + 1, READ_BUF_CAP);
         const json = try vi.advance_root_scalar("double", N);
         // Per https://www.exploringbinary.com/maximum-number-of-decimal-digits-in-binary-floating-point-numbers/, 1074 is the maximum number of significant fractional digits. Add 8 more digits for the biggest number: -0.<fraction>e-308.
         var tmpbuf: [N]u8 = undefined;
         if (!Iterator.copy_to_buffer(json, max_len, N, &tmpbuf)) {
-            vi.iter.log.err_fmt(&vi.iter, "Root number more than 1082 characters. start_position {} depth {}", .{ vi.start_position[0], vi.depth });
+            vi.iter.parser.log.err_fmt(&vi.iter, "Root number more than 1082 characters. start_position {} depth {}", .{ vi.start_position[0], vi.depth });
             return error.NUMBER_ERROR;
         }
         return number_parsing.parse_double(&tmpbuf);
@@ -1285,11 +1283,12 @@ pub const Parser = struct {
     parser: dom.Parser,
     src: *std.io.StreamSource,
     end_pos: u32,
-    read_buf: [READ_BUF_SIZE]u8 = undefined,
+    read_buf: [READ_BUF_CAP]u8 = undefined,
     /// result of src.read() - number of bytes read from src
     read_buf_len: u16 = 0,
     /// src index of the start of the buffer.  set to index[0] each src.read()
     read_buf_start_pos: u32,
+    log: Logger = .{ .depth = 0 },
 
     pub fn init(src: *std.io.StreamSource, allocator: *mem.Allocator, filename: []const u8, options: dom.Parser.Options) !Parser {
         var result = Parser{
@@ -1356,20 +1355,20 @@ pub const Parser = struct {
         position: [*]const u32,
         len_hint: u16,
     ) ![*]const u8 {
-        // println("peek() len_hint {} READ_BUF_SIZE {}", .{ len_hint, READ_BUF_SIZE });
-        if (len_hint > READ_BUF_SIZE) return error.CAPACITY;
+        // println("peek() len_hint {} READ_BUF_CAP {}", .{ len_hint, READ_BUF_CAP });
+        if (len_hint > READ_BUF_CAP) return error.CAPACITY;
         const start_pos = position[0];
         // println("\nTokenIterator: {} <= start {} end {} < read_buf_start_pos + len {}", .{ read_buf_start_pos, start, end, read_buf_start_pos + read_buf_len });
         if (parser.read_buf_start_pos <= start_pos and start_pos < parser.read_buf_start_pos + parser.read_buf_len) blk: {
             const offset = start_pos - parser.read_buf_start_pos;
-            if (offset + len_hint > READ_BUF_SIZE) break :blk;
+            if (offset + len_hint > READ_BUF_CAP) break :blk;
             return @ptrCast([*]const u8, &parser.read_buf) + offset;
         }
         // println("TokenIterator: seek and read()", .{});
         try parser.src.seekTo(start_pos);
         parser.read_buf_start_pos = start_pos;
         // not sure that 0xaa is the best value here but it does prevent false positives like [nul]
-        @memset(&parser.read_buf, 0xaa, READ_BUF_SIZE);
+        @memset(&parser.read_buf, 0xaa, READ_BUF_CAP);
         parser.read_buf_len = @truncate(u16, try parser.src.read(&parser.read_buf));
         return &parser.read_buf;
     }

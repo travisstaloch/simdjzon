@@ -13,7 +13,12 @@ No fallback for unsupported CPUs is provided (yet).
 ```console
 # json validation
 $ git clone https://github.com/travisstaloch/simdjzon
-$ zig build -Drelease-fast
+$ cd simdjzon
+$ zig build -Drelease-fast # uses the dom api by default
+$ zig-out/bin/simdjzon test/test.json
+$ echo $? # 0 on success
+0
+$ zig build -Drelease-fast -Dondemand # use the ondemand api
 $ zig-out/bin/simdjzon test/test.json
 $ echo $? # 0 on success
 0

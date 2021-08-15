@@ -6,8 +6,8 @@ const common = @import("common.zig");
 const simdjzon = @import("simdjzon.zig");
 const dom = simdjzon.dom;
 const ondemand = simdjzon.ondemand;
-pub const step_size = build_options.step_size;
-pub const read_buf_size = build_options.ondemand_read_size;
+pub const step_size = if (build_options.step_128) 128 else 64;
+pub const read_buf_cap = build_options.ondemand_read_cap;
 
 pub fn domMain() !u8 {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
