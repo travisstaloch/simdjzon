@@ -225,17 +225,25 @@ const Utf8Checker = struct {
     // zig fmt: on
 
     fn check_multibyte_lengths(input: v.u8x32, prev_input: v.u8x32, sc: v.u8x32) v.u8x32 {
-        const prev2 = @bitCast(v.i8x32, prev(2, input, prev_input));
-        const prev3 = @bitCast(v.i8x32, prev(3, input, prev_input));
+        const prev2 = prev(2, input, prev_input);
+        const prev3 = prev(3, input, prev_input);
         const must23 = must_be_2_3_continuation(prev2, prev3);
         // std.log.debug("input {s} prev_input {s} must23 {}", .{ @as([32]u8, input), @as([32]u8, prev_input), must23 });
         const must23_80 = must23 & @splat(32, @as(u8, 0x80));
         return must23_80 ^ sc;
     }
 
-    fn must_be_2_3_continuation(prev2: v.i8x32, prev3: v.i8x32) v.u8x32 {
-        const is_third_byte = @subWithSaturation(prev2, @bitCast(v.i8x32, @splat(32, @as(u8, 0b11100000 - 1)))); // Only 111_____ will be > 0
-        const is_fourth_byte = @subWithSaturation(prev3, @bitCast(v.i8x32, @splat(32, @as(u8, 0b11110000 - 1)))); // Only 1111____ will be > 0
+    fn must_be_2_3_continuation(prev2: v.u8x32, prev3: v.u8x32) v.u8x32 {
+        // do unsigned saturating subtraction, then interpret as signed so we can check if > 0 below
+        const is_third_byte = @bitCast(
+            v.i8x32,
+            @subWithSaturation(prev2, @splat(32, @as(u8, 0b11100000 - 1))),
+        ); // Only 111_____ will be > 0
+        const is_fourth_byte = @bitCast(
+            v.i8x32,
+            @subWithSaturation(prev3, @splat(32, @as(u8, 0b11110000 - 1))),
+        ); // Only 1111____ will be > 0
+
         // Caller requires a bool (all 1's). All values resulting from the subtraction will be <= 64, so signed comparison is fine.
         const result = @bitCast(v.i1x32, (is_third_byte | is_fourth_byte) > @splat(32, @as(i8, 0)));
         return @bitCast(v.u8x32, @as(v.i8x32, result));
@@ -314,8 +322,8 @@ const Utf8Checker = struct {
             255, 255, 255, 255, 255, 255,            255,            255,
             255, 255, 255, 255, 255, 0b11110000 - 1, 0b11100000 - 1, 0b11000000 - 1,
         };
-        const max_value = @splat(32, @bitCast(i8, max_array[@as(i8, @sizeOf(@TypeOf(max_array)) - @sizeOf(v.u8x32))]));
-        return @bitCast(v.u8x32, @subWithSaturation(@bitCast(v.i8x32, input), max_value));
+        const max_value = @splat(32, max_array[@sizeOf(@TypeOf(max_array)) - @sizeOf(v.u8x32)]);
+        return @subWithSaturation(input, max_value);
     }
 };
 
@@ -479,6 +487,7 @@ pub const StructuralIndexer = struct {
             try si.next(read_buf[0..64].*, block_1, reader_pos);
             try si.next(read_buf[64..128].*, block_2, reader_pos + 64);
         }
+        try si.checker.errors();
     }
 
     pub fn finish(si: *StructuralIndexer, parser: *Parser, idx: usize, len: usize, partial: bool) !void {
