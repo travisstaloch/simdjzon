@@ -3,14 +3,14 @@ const std = @import("std");
 const mem = std.mem;
 const os = std.os;
 const assert = std.debug.assert;
-usingnamespace @import("vector_types.zig");
-usingnamespace @import("llvm_intrinsics.zig");
-usingnamespace @import("c_intrinsics.zig");
+const v = @import("vector_types.zig");
+const llvm = @import("llvm_intrinsics.zig");
+const c = @import("c_intrinsics.zig");
 const string_parsing = @import("string_parsing.zig");
 const number_parsing = @import("number_parsing.zig");
 const atom_parsing = @import("atom_parsing.zig");
 const Logger = @import("Logger.zig");
-usingnamespace @import("common.zig");
+const cmn = @import("common.zig");
 
 pub const Document = struct {
     tape: std.ArrayListUnmanaged(u64),
@@ -32,10 +32,10 @@ pub const Document = struct {
         // worse with "[7,7,7,7,6,7,7,7,6,7,7,6,[7,7,7,7,6,7,7,7,6,7,7,6,7,7,7,7,7,7,6"
         //where capacity + 1 tape elements are
         // generated, see issue https://github.com/simdjson/simdjson/issues/345
-        const tape_capacity = ROUNDUP_N(capacity + 3, 64);
+        const tape_capacity = cmn.ROUNDUP_N(capacity + 3, 64);
         // a document with only zero-length strings... could have capacity/3 string
         // and we would need capacity/3 * 5 bytes on the string buffer
-        document.string_buf_cap = ROUNDUP_N(5 * capacity / 3 + SIMDJSON_PADDING, 64);
+        document.string_buf_cap = cmn.ROUNDUP_N(5 * capacity / 3 + cmn.SIMDJSON_PADDING, 64);
         errdefer {
             allocator.free(document.string_buf);
             document.tape.deinit(allocator);
@@ -65,14 +65,14 @@ const BitIndexer = struct {
         // In some instances, the next branch is expensive because it is mispredicted.
         // Unfortunately, in other cases,
         // it helps tremendously.
-        print("{b:0>64} | bits", .{@bitReverse(u64, bits_)});
+        cmn.print("{b:0>64} | bits", .{@bitReverse(u64, bits_)});
         if (bits == 0) {
-            println("", .{});
+            cmn.println("", .{});
             return;
         }
         const reader_pos = @intCast(i32, reader_pos_ - 64); //  this function is always passed last bits so reader_pos will be ahead by 64
         const cnt = @popCount(u64, bits);
-        println(", reader_pos {}", .{reader_pos});
+        cmn.println(", reader_pos {}", .{reader_pos});
         const start_count = indexer.tail.items.len;
 
         // Do the first 8 all together
@@ -114,20 +114,20 @@ const BitIndexer = struct {
 };
 
 const Utf8Checker = struct {
-    err: u8x32 = [1]u8{0} ** 32,
-    prev_input_block: u8x32 = [1]u8{0} ** 32,
-    prev_incomplete: u8x32 = [1]u8{0} ** 32,
+    err: v.u8x32 = [1]u8{0} ** 32,
+    prev_input_block: v.u8x32 = [1]u8{0} ** 32,
+    prev_incomplete: v.u8x32 = [1]u8{0} ** 32,
 
-    fn prev(comptime N: u8, chunk: u8x32, prev_chunk: u8x32) u8x32 {
+    fn prev(comptime N: u8, chunk: v.u8x32, prev_chunk: v.u8x32) v.u8x32 {
         return switch (N) {
-            1 => _prev1(chunk, prev_chunk),
-            2 => _prev2(chunk, prev_chunk),
-            3 => _prev3(chunk, prev_chunk),
+            1 => c._prev1(chunk, prev_chunk),
+            2 => c._prev2(chunk, prev_chunk),
+            3 => c._prev3(chunk, prev_chunk),
             else => unreachable,
         };
     }
     // zig fmt: off
-    inline fn check_special_cases(input: u8x32, prev1: u8x32) u8x32 {
+    inline fn check_special_cases(input: v.u8x32, prev1: v.u8x32) v.u8x32 {
         // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
         // Bit 1 = Too Long (ASCII followed by continuation)
         // Bit 2 = Overlong 3-byte
@@ -171,7 +171,7 @@ const Utf8Checker = struct {
             // 1111____ ________ <four+ byte lead in byte 1>
             TOO_SHORT | TOO_LARGE | TOO_LARGE_1000 | OVERLONG_4,
         } ** 2;
-        const byte_1_high = shuffleEpi8(tbl1, byte_1_high_0);
+        const byte_1_high = llvm.shuffleEpi8(tbl1, byte_1_high_0);
         const CARRY: u8 = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
         const byte_1_low0 = prev1 & @splat(32, @as(u8, 0x0F));
         
@@ -203,7 +203,7 @@ const Utf8Checker = struct {
             CARRY | TOO_LARGE | TOO_LARGE_1000,
             CARRY | TOO_LARGE | TOO_LARGE_1000,
         } ** 2;
-        const byte_1_low = shuffleEpi8(tbl2, byte_1_low0);
+        const byte_1_low = llvm.shuffleEpi8(tbl2, byte_1_low0);
 
         const byte_2_high_0 = input >> @splat(32, @as(u3, 4));
         const tbl3 = [16]u8{
@@ -219,32 +219,32 @@ const Utf8Checker = struct {
             // ________ 11______
             TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
         } ** 2;
-        const byte_2_high = shuffleEpi8(tbl3, byte_2_high_0);
+        const byte_2_high = llvm.shuffleEpi8(tbl3, byte_2_high_0);
         return (byte_1_high & byte_1_low & byte_2_high);
     }
     // zig fmt: on
 
-    fn check_multibyte_lengths(input: u8x32, prev_input: u8x32, sc: u8x32) u8x32 {
-        const prev2 = @bitCast(i8x32, prev(2, input, prev_input));
-        const prev3 = @bitCast(i8x32, prev(3, input, prev_input));
+    fn check_multibyte_lengths(input: v.u8x32, prev_input: v.u8x32, sc: v.u8x32) v.u8x32 {
+        const prev2 = @bitCast(v.i8x32, prev(2, input, prev_input));
+        const prev3 = @bitCast(v.i8x32, prev(3, input, prev_input));
         const must23 = must_be_2_3_continuation(prev2, prev3);
         // std.log.debug("input {s} prev_input {s} must23 {}", .{ @as([32]u8, input), @as([32]u8, prev_input), must23 });
         const must23_80 = must23 & @splat(32, @as(u8, 0x80));
         return must23_80 ^ sc;
     }
 
-    fn must_be_2_3_continuation(prev2: i8x32, prev3: i8x32) u8x32 {
-        const is_third_byte = _mm512_subs_epu8(prev2, @bitCast(i8x32, @splat(32, @as(u8, 0b11100000 - 1)))); // Only 111_____ will be > 0
-        const is_fourth_byte = _mm512_subs_epu8(prev3, @bitCast(i8x32, @splat(32, @as(u8, 0b11110000 - 1)))); // Only 1111____ will be > 0
+    fn must_be_2_3_continuation(prev2: v.i8x32, prev3: v.i8x32) v.u8x32 {
+        const is_third_byte = llvm._mm512_subs_epu8(prev2, @bitCast(v.i8x32, @splat(32, @as(u8, 0b11100000 - 1)))); // Only 111_____ will be > 0
+        const is_fourth_byte = llvm._mm512_subs_epu8(prev3, @bitCast(v.i8x32, @splat(32, @as(u8, 0b11110000 - 1)))); // Only 1111____ will be > 0
         // Caller requires a bool (all 1's). All values resulting from the subtraction will be <= 64, so signed comparison is fine.
-        const result = @bitCast(i1x32, (is_third_byte | is_fourth_byte) > @splat(32, @as(i8, 0)));
-        return @bitCast(u8x32, @as(i8x32, result));
+        const result = @bitCast(v.i1x32, (is_third_byte | is_fourth_byte) > @splat(32, @as(i8, 0)));
+        return @bitCast(v.u8x32, @as(v.i8x32, result));
     }
 
     //
     // Check whether the current bytes are valid UTF-8.
     //
-    inline fn check_utf8_bytes(checker: *Utf8Checker, input: u8x32, prev_input: u8x32) void {
+    inline fn check_utf8_bytes(checker: *Utf8Checker, input: v.u8x32, prev_input: v.u8x32) void {
         // Flip prev1...prev3 so we can easily determine if they are 2+, 3+ or 4+ lead bytes
         // (2, 3, 4-byte leads become large positive numbers instead of small negative numbers)
         const prev1 = prev(1, input, prev_input);
@@ -261,16 +261,16 @@ const Utf8Checker = struct {
         checker.err |= checker.prev_incomplete;
     }
 
-    inline fn is_ascii(input: u8x64) bool {
+    inline fn is_ascii(input: v.u8x64) bool {
         const bytes: [64]u8 = input;
-        const a: u8x32 = bytes[0..32].*;
-        const b: u8x32 = bytes[32..64].*;
+        const a: v.u8x32 = bytes[0..32].*;
+        const b: v.u8x32 = bytes[32..64].*;
 
-        return _mm256_movemask_epi8(a | b) == 0;
+        return llvm._mm256_movemask_epi8(a | b) == 0;
     }
 
-    inline fn check_next_input(checker: *Utf8Checker, input: u8x64) void {
-        // const NUM_CHUNKS = STEP_SIZE / 32;
+    inline fn check_next_input(checker: *Utf8Checker, input: v.u8x64) void {
+        // const NUM_CHUNKS = cmn.STEP_SIZE / 32;
         const NUM_CHUNKS = 2;
         const chunks = @bitCast([NUM_CHUNKS][32]u8, input);
         if (is_ascii(input)) {
@@ -296,7 +296,7 @@ const Utf8Checker = struct {
         }
     }
     // do not forget to call check_eof!
-    inline fn errors(checker: Utf8Checker) JsonError!void {
+    inline fn errors(checker: Utf8Checker) cmn.JsonError!void {
         const err = @reduce(.Or, checker.err);
         if (err != 0) return error.UTF8_ERROR;
     }
@@ -305,7 +305,7 @@ const Utf8Checker = struct {
     // Return nonzero if there are incomplete multibyte characters at the end of the block:
     // e.g. if there is a 4-byte character, but it's 3 bytes from the end.
     //
-    inline fn is_incomplete(input: u8x32) u8x32 {
+    inline fn is_incomplete(input: v.u8x32) v.u8x32 {
         // If the previous input's last 3 bytes match this, they're too short (they ended at EOF):
         // ... 1111____ 111_____ 11______
         const max_array: [32]u8 = .{
@@ -314,8 +314,8 @@ const Utf8Checker = struct {
             255, 255, 255, 255, 255, 255,            255,            255,
             255, 255, 255, 255, 255, 0b11110000 - 1, 0b11100000 - 1, 0b11000000 - 1,
         };
-        const max_value = @splat(32, @bitCast(i8, max_array[@as(i8, @sizeOf(@TypeOf(max_array)) - @sizeOf(u8x32))]));
-        return @bitCast(u8x32, _mm512_subs_epu8(@bitCast(i8x32, input), max_value));
+        const max_value = @splat(32, @bitCast(i8, max_array[@as(i8, @sizeOf(@TypeOf(max_array)) - @sizeOf(v.u8x32))]));
+        return @bitCast(v.u8x32, llvm._mm512_subs_epu8(@bitCast(v.i8x32, input), max_value));
     }
 };
 
@@ -337,10 +337,10 @@ const StringBlock = struct {
 const CharacterBlock = struct {
     whitespace: u64,
     op: u64,
-    pub fn classify(input_vec: u8x64) CharacterBlock {
+    pub fn classify(input_vec: v.u8x64) CharacterBlock {
         // These lookups rely on the fact that anything < 127 will match the lower 4 bits, which is why
         // we can't use the generic lookup_16.
-        const whitespace_table: u8x32 = [16]u8{ ' ', 100, 100, 100, 17, 100, 113, 2, 100, '\t', '\n', 112, 100, '\r', 100, 100 } ** 2;
+        const whitespace_table: v.u8x32 = [16]u8{ ' ', 100, 100, 100, 17, 100, 113, 2, 100, '\t', '\n', 112, 100, '\r', 100, 100 } ** 2;
 
         // The 6 operators (:,[]{}) have these values:
         //
@@ -361,7 +361,7 @@ const CharacterBlock = struct {
         // NOTE: Due to the | 0x20, this ALSO treats <FF> and <SUB> (control characters 0C and 1A) like ,
         // and :. This gets caught in stage 2, which checks the actual character to ensure the right
         // operators are in the right places.
-        const op_table: u8x32 = [16]u8{
+        const op_table: v.u8x32 = [16]u8{
             0, 0, 0, 0,
             0, 0, 0, 0,
             0,   0,   ':', '{', // : = 3A, [ = 5B, { = 7B
@@ -375,20 +375,20 @@ const CharacterBlock = struct {
         // minifying (we only need whitespace).
 
         const in = @bitCast([64]u8, input_vec);
-        const chunk0: u8x32 = in[0..32].*;
-        const chunk1: u8x32 = in[32..64].*;
-        const wss: [2]u8x32 = .{
-            shuffleEpi8(whitespace_table, chunk0),
-            shuffleEpi8(whitespace_table, chunk1),
+        const chunk0: v.u8x32 = in[0..32].*;
+        const chunk1: v.u8x32 = in[32..64].*;
+        const wss: [2]v.u8x32 = .{
+            llvm.shuffleEpi8(whitespace_table, chunk0),
+            llvm.shuffleEpi8(whitespace_table, chunk1),
         };
-        const whitespace = input_vec == @bitCast(u8x64, wss);
+        const whitespace = input_vec == @bitCast(v.u8x64, wss);
         // Turn [ and ] into { and }
         const curlified = input_vec | @splat(64, @as(u8, 0x20));
-        const ops: [2]u8x32 = .{
-            shuffleEpi8(op_table, chunk0),
-            shuffleEpi8(op_table, chunk1),
+        const ops: [2]v.u8x32 = .{
+            llvm.shuffleEpi8(op_table, chunk0),
+            llvm.shuffleEpi8(op_table, chunk1),
         };
-        const op = curlified == @bitCast(u8x64, ops);
+        const op = curlified == @bitCast(v.u8x64, ops);
 
         return .{ .whitespace = @ptrCast(*const u64, &whitespace).*, .op = @ptrCast(*const u64, &op).* };
     }
@@ -440,7 +440,7 @@ pub const StructuralIndexer = struct {
         return result;
     }
 
-    fn nextBlock(parser: *Parser, input_vec: u8x64) Block {
+    fn nextBlock(parser: *Parser, input_vec: v.u8x64) Block {
         const string = parser.nextStringBlock(input_vec);
         // identifies the white-space and the structurat characters
         const characters = CharacterBlock.classify(input_vec);
@@ -467,8 +467,8 @@ pub const StructuralIndexer = struct {
         };
     }
 
-    pub fn step(si: *StructuralIndexer, read_buf: [STEP_SIZE]u8, parser: *Parser, reader_pos: u64) !void {
-        if (STEP_SIZE == 64) {
+    pub fn step(si: *StructuralIndexer, read_buf: [cmn.STEP_SIZE]u8, parser: *Parser, reader_pos: u64) !void {
+        if (cmn.STEP_SIZE == 64) {
             const block_1 = nextBlock(parser, read_buf);
             // println("{b:0>64} | characters.op", .{@bitReverse(u64, block_1.characters.op)});
             try si.next(read_buf, block_1, reader_pos);
@@ -548,7 +548,7 @@ pub const StructuralIndexer = struct {
         return si.checker.errors();
     }
 
-    fn lteq(comptime T: type, chunks: [2]u8x32, m: T) u64 {
+    fn lteq(comptime T: type, chunks: [2]v.u8x32, m: T) u64 {
         const mask = @splat(32, m);
         const a = chunks[0] <= mask;
         const b = chunks[1] <= mask;
@@ -557,16 +557,16 @@ pub const StructuralIndexer = struct {
         return aint | bint;
     }
 
-    fn next(si: *StructuralIndexer, input_vec: u8x64, block: Block, reader_pos: u64) !void {
-        const chunks = @bitCast([2]u8x32, input_vec);
+    fn next(si: *StructuralIndexer, input_vec: v.u8x64, block: Block, reader_pos: u64) !void {
+        const chunks = @bitCast([2]v.u8x32, input_vec);
         const unescaped = lteq(u8, chunks, 0x1F);
-        if (debug) {
-            var input: [STEP_SIZE]u8 = undefined;
+        if (cmn.debug) {
+            var input: [cmn.STEP_SIZE]u8 = undefined;
             std.mem.copy(u8, &input, &@as([64]u8, input_vec));
-            for (input) |*c| {
-                if (c.* == '\n') c.* = '-';
+            for (input) |*ch| {
+                if (ch.* == '\n') ch.* = '-';
             }
-            println("{s}", .{input});
+            cmn.println("{s}", .{input});
         }
         // println("{b:0>64} | block.characters.op", .{@bitReverse(u64, block.characters.op)});
         // println("{b:0>64} | block.characters.whitespace", .{@bitReverse(u64, block.characters.whitespace)});
@@ -683,7 +683,7 @@ pub const Iterator = struct {
         }
     }
 
-    inline fn object_begin(iter: *Iterator, visitor: *TapeBuilder) Error!State {
+    inline fn object_begin(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!State {
         iter.log.start_value(iter, "object");
         iter.depth += 1;
         // iter.log.line_fmt(iter, "", "depth", "{d}/{d}", .{ iter.depth, iter.parser.max_depth });
@@ -704,7 +704,7 @@ pub const Iterator = struct {
         return .object_field;
     }
 
-    inline fn object_field(iter: *Iterator, visitor: *TapeBuilder) Error!State {
+    inline fn object_field(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!State {
         if (iter.advance()[0] != ':') {
             iter.log.err(iter, "Missing colon after key in object");
             return error.TAPE_ERROR;
@@ -727,7 +727,7 @@ pub const Iterator = struct {
         return .object_continue;
     }
 
-    inline fn object_continue(iter: *Iterator, visitor: *TapeBuilder) Error!State {
+    inline fn object_continue(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!State {
         const value = iter.advance();
         // std.log.debug("object_continue() value '{c}'", .{value});
         switch (value[0]) {
@@ -755,7 +755,7 @@ pub const Iterator = struct {
         unreachable;
     }
 
-    inline fn scope_end(iter: *Iterator, _: *TapeBuilder) Error!State {
+    inline fn scope_end(iter: *Iterator, _: *TapeBuilder) cmn.Error!State {
         // std.log.debug("scope_end iter.depth {}", .{iter.depth});
         iter.depth -= 1;
         if (iter.depth == 0) return .document_end;
@@ -766,7 +766,7 @@ pub const Iterator = struct {
         return .object_continue;
     }
 
-    inline fn array_begin(iter: *Iterator, visitor: *TapeBuilder) Error!State {
+    inline fn array_begin(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!State {
         iter.log.start_value(iter, "array");
         iter.depth += 1;
         if (iter.depth >= iter.parser.max_depth) {
@@ -778,7 +778,7 @@ pub const Iterator = struct {
         return .array_value;
     }
 
-    inline fn array_value(iter: *Iterator, visitor: *TapeBuilder) Error!State {
+    inline fn array_value(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!State {
         const value = iter.advance();
         switch (value[0]) {
             '{' => {
@@ -800,7 +800,7 @@ pub const Iterator = struct {
         return .array_continue;
     }
 
-    inline fn array_continue(iter: *Iterator, visitor: *TapeBuilder) Error!State {
+    inline fn array_continue(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!State {
         switch (iter.advance()[0]) {
             ',' => {
                 iter.increment_count();
@@ -819,10 +819,10 @@ pub const Iterator = struct {
         unreachable;
     }
 
-    inline fn document_end(iter: *Iterator, visitor: *TapeBuilder) Error!void {
+    inline fn document_end(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!void {
         iter.log.end_value(iter, "document");
         try visitor.visit_document_end();
-        iter.parser.next_structural_index = try ptr_diff(
+        iter.parser.next_structural_index = try cmn.ptr_diff(
             u32,
             iter._next_structural,
             iter.parser.indexer.bit_indexer.tail.items.ptr,
@@ -831,7 +831,7 @@ pub const Iterator = struct {
         // If we didn't make it to the end, it's an error
         // std.log.debug("next_structural_index {} n_structural_indexes {}", .{ iter.parser.next_structural_index, iter.parser.n_structural_indexes });
         // have to add because there are 3 additional items added to tail in finish()
-        if (!STREAMING and iter.parser.next_structural_index != iter.parser.n_structural_indexes) {
+        if (!cmn.STREAMING and iter.parser.next_structural_index != iter.parser.n_structural_indexes) {
             iter.log.err(iter, "More than one JSON value at the root of the document, or extra characters at the end of the JSON!");
             return error.TAPE_ERROR;
         }
@@ -970,11 +970,11 @@ pub const TapeBuilder = struct {
 
     inline fn on_start_string(tb: *TapeBuilder, iter: *Iterator) ![*]u8 {
         // iter.log.line_fmt(iter, "", "start_string", "iter.parser.doc.string_buf.len {}", .{iter.parser.doc.string_buf.len});
-        tb.append(ptr_diff(u64, tb.current_string_buf_loc, iter.parser.doc.string_buf.ptr) catch unreachable, .STRING);
+        tb.append(cmn.ptr_diff(u64, tb.current_string_buf_loc, iter.parser.doc.string_buf.ptr) catch unreachable, .STRING);
         return tb.current_string_buf_loc + @sizeOf(u32);
     }
     inline fn on_end_string(tb: *TapeBuilder, iter: *Iterator, dst: [*]u8) !void {
-        const str_len = try ptr_diff(u32, dst, tb.current_string_buf_loc + @sizeOf(u32));
+        const str_len = try cmn.ptr_diff(u32, dst, tb.current_string_buf_loc + @sizeOf(u32));
         // println("str_len {} str '{s}'", .{ str_len, (tb.current_string_buf_loc + 4)[0..str_len] });
 
         // TODO check for overflow in case someone has a crazy string (>=4GB?)
@@ -1007,23 +1007,23 @@ pub const TapeBuilder = struct {
         };
     }
 
-    inline fn visit_number(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
+    inline fn visit_number(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) cmn.Error!void {
         iter.log.value(iter, "number");
         try number_parsing.parse_number(value, tb);
     }
-    inline fn visit_true_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
+    inline fn visit_true_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) cmn.Error!void {
         iter.log.value(iter, "true");
         assert(value[0] == 't');
         if (!atom_parsing.is_valid_rue_atom(value + 1)) return error.T_ATOM_ERROR;
         tb.append(0, TapeType.TRUE);
     }
-    inline fn visit_false_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
+    inline fn visit_false_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) cmn.Error!void {
         iter.log.value(iter, "false");
         assert(value[0] == 'f');
         if (!atom_parsing.is_valid_alse_atom(value + 1)) return error.T_ATOM_ERROR;
         tb.append(0, TapeType.FALSE);
     }
-    inline fn visit_null_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) Error!void {
+    inline fn visit_null_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) cmn.Error!void {
         iter.log.value(iter, "null");
         assert(value[0] == 'n');
         if (!atom_parsing.is_valid_ull_atom(value + 1)) return error.T_ATOM_ERROR;
@@ -1044,7 +1044,7 @@ pub const TapeBuilder = struct {
         };
     }
 
-    inline fn visit_string(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8, key: bool) Error!void {
+    inline fn visit_string(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8, key: bool) cmn.Error!void {
         iter.log.value(iter, if (key) "key" else "string");
         var dst = try tb.on_start_string(iter);
         dst = string_parsing.parse_string(value + 1, dst) orelse {
@@ -1059,11 +1059,11 @@ pub const TapeBuilder = struct {
         return tb.visit_string(iter, value, true);
     }
 
-    pub inline fn visit_empty_object(tb: *TapeBuilder) Error!void {
+    pub inline fn visit_empty_object(tb: *TapeBuilder) cmn.Error!void {
         return tb.empty_container(.START_OBJECT, .END_OBJECT);
     }
 
-    pub inline fn visit_empty_array(tb: *TapeBuilder) Error!void {
+    pub inline fn visit_empty_array(tb: *TapeBuilder) cmn.Error!void {
         return tb.empty_container(.START_ARRAY, .END_ARRAY);
     }
 
@@ -1107,7 +1107,7 @@ pub const Parser = struct {
     input_len: u32 = 0,
 
     pub const Options = struct {
-        max_depth: u16 = DEFAULT_MAX_DEPTH,
+        max_depth: u16 = cmn.DEFAULT_MAX_DEPTH,
     };
 
     pub fn initFile(allocator: *mem.Allocator, filename: []const u8, options: Options) !Parser {
@@ -1122,7 +1122,7 @@ pub const Parser = struct {
         parser.input_len = try parser.read_file(filename);
         const capacity = parser.input_len;
         try parser.doc.allocate(allocator, capacity);
-        const max_structures = ROUNDUP_N(capacity, 64) + 2 + 7;
+        const max_structures = cmn.ROUNDUP_N(capacity, 64) + 2 + 7;
         try parser.indexer.bit_indexer.tail.ensureTotalCapacity(allocator, max_structures);
         try parser.open_containers.ensureTotalCapacity(allocator, options.max_depth);
         return parser;
@@ -1142,8 +1142,8 @@ pub const Parser = struct {
         };
         parser.input_len = try std.math.cast(u32, input.len);
         const capacity = parser.input_len;
-        const max_structures = ROUNDUP_N(capacity, 64) + 2 + 7;
-        const paddedlen = try std.math.add(u32, capacity, SIMDJSON_PADDING);
+        const max_structures = cmn.ROUNDUP_N(capacity, 64) + 2 + 7;
+        const paddedlen = try std.math.add(u32, capacity, cmn.SIMDJSON_PADDING);
         parser.bytes = try parser.allocator.alloc(u8, paddedlen);
         mem.copy(u8, parser.bytes, input);
 
@@ -1162,7 +1162,7 @@ pub const Parser = struct {
         defer f.close();
         const len = try std.math.cast(u32, try f.getEndPos());
         if (parser.bytes.len < len) {
-            const paddedlen = try std.math.add(u32, len, SIMDJSON_PADDING);
+            const paddedlen = try std.math.add(u32, len, cmn.SIMDJSON_PADDING);
             parser.bytes = try parser.allocator.realloc(parser.bytes, paddedlen);
             const nbytes = try f.read(parser.bytes);
             if (nbytes < len) return error.IO_ERROR;
@@ -1200,7 +1200,7 @@ pub const Parser = struct {
         return (even_bits ^ invert_mask) & follows_escape;
     }
 
-    inline fn nextStringBlock(parser: *Parser, input_vec: u8x64) StringBlock {
+    inline fn nextStringBlock(parser: *Parser, input_vec: v.u8x64) StringBlock {
         const backslash_vec = input_vec == @splat(64, @as(u8, '\\'));
         const backslash = @bitCast(u64, backslash_vec);
         const escaped = parser.find_escaped(backslash);
@@ -1213,8 +1213,8 @@ pub const Parser = struct {
         // Then we xor with prev_in_string: if we were in a string already, its effect is flipped
         // (characters inside strings are outside, and characters outside strings are inside).
         //
-        const ones: u64x2 = [1]u64{std.math.maxInt(u64)} ** 2;
-        var in_string = carrylessMul(.{ quote, 0 }, ones)[0];
+        const ones: v.u64x2 = [1]u64{std.math.maxInt(u64)} ** 2;
+        var in_string = llvm.carrylessMul(.{ quote, 0 }, ones)[0];
         // println("{b:0>64} | quote a", .{@bitReverse(u64, quote)});
         // println("{b:0>64} | ones[0]", .{@bitReverse(u64, ones[0])});
         // println("{b:0>64} | in_string a", .{@bitReverse(u64, in_string)});
@@ -1248,12 +1248,12 @@ pub const Parser = struct {
 
     fn stage1(parser: *Parser) !void {
         const end_pos = parser.input_len;
-        const end_pos_minus_step = if (end_pos > STEP_SIZE) end_pos - STEP_SIZE else 0;
+        const end_pos_minus_step = if (end_pos > cmn.STEP_SIZE) end_pos - cmn.STEP_SIZE else 0;
 
         var pos: u32 = 0;
-        while (pos < end_pos_minus_step) : (pos += STEP_SIZE) {
+        while (pos < end_pos_minus_step) : (pos += cmn.STEP_SIZE) {
             // println("i {} pos {}", .{ i, pos });
-            const read_buf = parser.bytes[pos..][0..STEP_SIZE];
+            const read_buf = parser.bytes[pos..][0..cmn.STEP_SIZE];
             try parser.indexer.step(read_buf.*, parser, pos);
             // for (blocks) |block| {
             //     println("{b:0>64} | characters.whitespace", .{@bitReverse(u64, block.characters.whitespace)});
@@ -1261,11 +1261,11 @@ pub const Parser = struct {
             //     println("{b:0>64} | in_string", .{@bitReverse(u64, block.strings.in_string)});
             // }
         }
-        var read_buf = [1]u8{0x20} ** STEP_SIZE;
+        var read_buf = [1]u8{0x20} ** cmn.STEP_SIZE;
         std.mem.copy(u8, &read_buf, parser.bytes[pos..end_pos]);
         // std.log.debug("read_buf {d}", .{read_buf});
         try parser.indexer.step(read_buf, parser, pos);
-        try parser.indexer.finish(parser, pos + STEP_SIZE, end_pos, STREAMING);
+        try parser.indexer.finish(parser, pos + cmn.STEP_SIZE, end_pos, cmn.STREAMING);
     }
 
     fn stage2(parser: *Parser) !void {
@@ -1299,7 +1299,7 @@ const Array = struct {
         return null;
     }
 
-    pub inline fn at_pointer(arr: Array, _json_pointer: []const u8) Error!Element {
+    pub inline fn at_pointer(arr: Array, _json_pointer: []const u8) cmn.Error!Element {
         if (_json_pointer.len == 0)
             return Element{ .tape = arr.tape }
         else if (_json_pointer[0] != '/')
@@ -1351,7 +1351,7 @@ const Object = struct {
         return null;
     }
 
-    pub fn at_pointer(o: Object, _json_pointer: []const u8) Error!Element {
+    pub fn at_pointer(o: Object, _json_pointer: []const u8) cmn.Error!Element {
         if (_json_pointer.len == 0) // an empty string means that we return the current node
             return Element{ .tape = o.tape } // copy the current node
         else if (_json_pointer[0] != '/') // otherwise there is an error
@@ -1524,7 +1524,7 @@ const TapeRefIterator = struct {
 const Element = struct {
     tape: TapeRef,
 
-    pub inline fn at_pointer(ele: Element, json_pointer: []const u8) Error!Element {
+    pub inline fn at_pointer(ele: Element, json_pointer: []const u8) cmn.Error!Element {
         return switch (ele.tape.tape_ref_type()) {
             .START_OBJECT => (try ele.get_object()).at_pointer(json_pointer),
             .START_ARRAY => (try ele.get_array()).at_pointer(json_pointer),
@@ -1540,7 +1540,7 @@ const Element = struct {
         return if (ele.get_as_type(.ARRAY)) |a| a.ARRAY.at(idx) else |_| null;
     }
 
-    pub fn get(ele: Element, out: anytype) Error!void {
+    pub fn get(ele: Element, out: anytype) cmn.Error!void {
         const T = @TypeOf(out);
         const info = @typeInfo(T);
         switch (info) {
@@ -1615,7 +1615,7 @@ const Element = struct {
         }
     }
 
-    pub fn get_as_type(ele: Element, ele_type: ElementType) Error!Value {
+    pub fn get_as_type(ele: Element, ele_type: ElementType) cmn.Error!Value {
         return switch (ele_type) {
             .OBJECT => Value{ .OBJECT = try ele.get_object() },
             .ARRAY => Value{ .ARRAY = try ele.get_array() },
@@ -1634,7 +1634,7 @@ const Element = struct {
     pub fn get_object(ele: Element) !Object {
         return (try ele.get_tape_type(.START_OBJECT)).OBJECT;
     }
-    pub fn get_int64(ele: Element) Error!i64 {
+    pub fn get_int64(ele: Element) cmn.Error!i64 {
         return if (!ele.is(.INT64))
             if (ele.is(.UINT64)) blk: {
                 const result = ele.next_tape_value(u64);
@@ -1646,7 +1646,7 @@ const Element = struct {
         else
             ele.next_tape_value(i64);
     }
-    pub fn get_uint64(ele: Element) Error!u64 {
+    pub fn get_uint64(ele: Element) cmn.Error!u64 {
         return if (!ele.is(.UINT64))
             if (ele.is(.INT64)) blk: {
                 const result = ele.next_tape_value(i64);

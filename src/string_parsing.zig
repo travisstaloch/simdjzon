@@ -1,6 +1,6 @@
 const std = @import("std");
 const mem = std.mem;
-usingnamespace @import("vector_types.zig");
+const v = @import("vector_types.zig");
 const _mm256_storeu_si256 = @import("llvm_intrinsics.zig")._mm256_storeu_si256;
 const common = @import("common.zig");
 
@@ -231,14 +231,14 @@ pub const BackslashAndQuote = struct {
 
     pub inline fn copy_and_find(src: [*]const u8, dst: [*]u8) !BackslashAndQuote {
         // std.log.debug("nbytes {} s: '{s}'", .{ nbytes, s[0..nbytes] });
-        const v: u8x32 = src[0..BYTES_PROCESSED].*;
+        const src_vec: v.u8x32 = src[0..BYTES_PROCESSED].*;
         // store to dest unconditionally - we can overwrite the bits we don't like later
         // v.store(dst);
         // VMOVDQU
         // _mm256_storeu_si256(dst, v);
-        dst[0..BYTES_PROCESSED].* = v;
-        const bs = v == @splat(BYTES_PROCESSED, @as(u8, '\\'));
-        const qs = v == @splat(BYTES_PROCESSED, @as(u8, '"'));
+        dst[0..BYTES_PROCESSED].* = src_vec;
+        const bs = src_vec == @splat(BYTES_PROCESSED, @as(u8, '\\'));
+        const qs = src_vec == @splat(BYTES_PROCESSED, @as(u8, '"'));
         return BackslashAndQuote{ .bs_bits = @ptrCast(*const u32, &bs).*, .quote_bits = @ptrCast(*const u32, &qs).* };
     }
 

@@ -4,7 +4,7 @@ const common = @import("common.zig");
 const Ondemand = @import("ondemand.zig");
 const println = common.println;
 const print = common.print;
-usingnamespace @import("llvm_intrinsics.zig");
+const llvm = @import("llvm_intrinsics.zig");
 
 depth: u8 = 0,
 
@@ -140,10 +140,10 @@ pub fn value2(log: *Logger, iter: anytype, typ: []const u8, detail: []const u8, 
 
 pub fn start_value(log: *Logger, iter: anytype, typ: []const u8) void {
     log.line(iter, "+", typ, "");
-    if (common.debug) log.depth = sat_add_u8(log.depth, 1);
+    if (common.debug) log.depth = llvm.sat_add_u8(log.depth, 1);
 }
 pub fn end_value(log: *Logger, iter: anytype, typ: []const u8) void {
-    if (common.debug) log.depth = sat_sub_u8(log.depth, 1);
+    if (common.debug) log.depth = llvm.sat_sub_u8(log.depth, 1);
     log.line(iter, "-", typ, "");
 }
 

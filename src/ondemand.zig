@@ -3,7 +3,7 @@ const mem = std.mem;
 const os = std.os;
 const assert = std.debug.assert;
 
-usingnamespace @import("common.zig");
+const cmn = @import("common.zig");
 const dom = @import("dom.zig");
 const Logger = @import("Logger.zig");
 const number_parsing = @import("number_parsing.zig");
@@ -70,7 +70,7 @@ pub const Value = struct {
         };
     }
 
-    pub fn get(val: *Value, out: anytype, options: GetOptions) Error!void {
+    pub fn get(val: *Value, out: anytype, options: GetOptions) cmn.Error!void {
         const T = @TypeOf(out);
         const info = @typeInfo(T);
         switch (info) {
@@ -384,7 +384,7 @@ const TokenIterator = struct {
 pub const Iterator = struct {
     token: TokenIterator,
     parser: *Parser,
-    err: Error!void = {},
+    err: cmn.Error!void = {},
     depth: u32,
 
     pub fn init(parser: *Parser) Iterator {
@@ -419,7 +419,7 @@ pub const Iterator = struct {
         const n_structural_indexes = iter.parser.parser.n_structural_indexes;
         assert(n_structural_indexes > 0);
         const result = iter.parser.structural_indices().ptr + (n_structural_indexes - 1);
-        // println("tail.items {any} n_structural_indexes {} result {}\n", .{ iter.parser.structural_indices(), n_structural_indexes, result[0] });
+        // cmn.println("tail.items {any} n_structural_indexes {} result {}\n", .{ iter.parser.structural_indices(), n_structural_indexes, result[0] });
         return result;
     }
     pub fn root_checkpoint(iter: Iterator) [*]const u32 {
@@ -487,7 +487,7 @@ pub const Iterator = struct {
         return iter.report_error(error.TAPE_ERROR, "not enough close braces");
     }
 
-    fn report_error(iter: *Iterator, err: Error, message: []const u8) Error {
+    fn report_error(iter: *Iterator, err: cmn.Error, message: []const u8) cmn.Error {
         _ = message;
         _ = iter;
         assert(err != error.UNINITIALIZED and err != error.INCORRECT_TYPE and err != error.NO_SUCH_FIELD);
@@ -702,7 +702,7 @@ pub const ValueIterator = struct {
         vi.assert_at_start();
         return vi.iter.advance(peek_len);
     }
-    fn incorrect_type_error(vi: *ValueIterator, message: []const u8) Error {
+    fn incorrect_type_error(vi: *ValueIterator, message: []const u8) cmn.Error {
         _ = message;
         vi.iter.parser.log.err_fmt(&vi.iter, "{s}.  start_position {} depth {}", .{ message, vi.start_position[0], vi.depth });
         return error.INCORRECT_TYPE;
@@ -802,11 +802,11 @@ pub const ValueIterator = struct {
     fn copy_key_without_quotes(key_buf: []u8, key: [*]const u8, key_len: usize) void {
         mem.copy(u8, key_buf, key[1..std.math.min(key_len, key_buf.len)]);
         // const end = string_parsing.parse_string(key + 1, key_buf.ptr);
-        // const len = try ptr_diff(u8, end.?, key_buf.ptr);
+        // const len = try cmn.ptr_diff(u8, end.?, key_buf.ptr);
         // return key_buf[0..len];
     }
     fn find_field_raw(vi: *ValueIterator, key: []const u8) !bool {
-        // println("find_field_raw vi.depth {} vi.iter.depth {}", .{ vi.depth, vi.iter.depth });
+        // cmn.println("find_field_raw vi.depth {} vi.iter.depth {}", .{ vi.depth, vi.iter.depth });
         var has_value = false;
         // TODO add build option for this key buffer length
         var key_buf: [1024]u8 = undefined;
@@ -871,7 +871,7 @@ pub const ValueIterator = struct {
             if (key.len + 2 > key_buf.len) return error.STRING_ERROR;
             copy_key_with_quotes(&key_buf, try vi.field_key(), key.len);
 
-            println("actual_key '{s}'", .{key_buf[0..key.len]});
+            cmn.println("actual_key '{s}'", .{key_buf[0..key.len]});
 
             // size_t max_key_length = vi.iter.peek_length() - 2; // -2 for the two quotes
             // if ((error = field_key().get(actual_key) )) { abandon(); return error; };
@@ -1068,7 +1068,7 @@ pub const ValueIterator = struct {
 
     pub fn unescape(comptime T: type, src: [*]const u8, dst: [*]u8) !T {
         const end = string_parsing.parse_string(src, dst) orelse return error.STRING_ERROR;
-        const len = try ptr_diff(u32, end, dst);
+        const len = try cmn.ptr_diff(u32, end, dst);
         return @as(T, dst[0..len]);
     }
 
@@ -1172,7 +1172,7 @@ pub const ValueIterator = struct {
 fn unsafe_is_equal(a: [*]const u8, target: []const u8) bool {
     // Assumptions: does not contain unescaped quote characters, and
     // the raw content is quote terminated within a valid JSON string.
-    if (target.len <= SIMDJSON_PADDING)
+    if (target.len <= cmn.SIMDJSON_PADDING)
         return (a[target.len + 1] == '"') and mem.eql(u8, a[1 .. target.len + 1], target);
 
     var r = a;
@@ -1306,7 +1306,7 @@ pub const Parser = struct {
             .read_buf_len = 0,
         };
         const capacity = result.end_pos;
-        const max_structures = ROUNDUP_N(capacity, 64) + 2 + 7;
+        const max_structures = cmn.ROUNDUP_N(capacity, 64) + 2 + 7;
         try result.parser.indexer.bit_indexer.tail.ensureTotalCapacity(allocator, max_structures);
         try result.parser.open_containers.ensureTotalCapacity(allocator, options.max_depth);
         return result;
@@ -1318,25 +1318,25 @@ pub const Parser = struct {
 
     pub fn stage1(p: *Parser) !void {
         var pos: u32 = 0;
-        var read_buf: [STEP_SIZE]u8 = undefined;
+        var read_buf: [cmn.STEP_SIZE]u8 = undefined;
         var bytes_read: u32 = undefined;
-        println("", .{});
-        while (true) : (pos += STEP_SIZE) {
-            // println("i {} pos {}", .{ i, pos });
+        cmn.println("", .{});
+        while (true) : (pos += cmn.STEP_SIZE) {
+            // cmn.println("i {} pos {}", .{ i, pos });
             bytes_read = @intCast(u32, try p.src.read(&read_buf));
-            if (bytes_read < STEP_SIZE) break;
+            if (bytes_read < cmn.STEP_SIZE) break;
 
             try p.parser.indexer.step(read_buf, &p.parser, pos);
             // for (blocks) |block| {
-            //     println("{b:0>64} | characters.whitespace", .{@bitReverse(u64, block.characters.whitespace)});
-            //     println("{b:0>64} | characters.op", .{@bitReverse(u64, block.characters.op)});
-            //     println("{b:0>64} | in_string", .{@bitReverse(u64, block.strings.in_string)});
+            //     cmn.println("{b:0>64} | characters.whitespace", .{@bitReverse(u64, block.characters.whitespace)});
+            //     cmn.println("{b:0>64} | characters.op", .{@bitReverse(u64, block.characters.op)});
+            //     cmn.println("{b:0>64} | in_string", .{@bitReverse(u64, block.strings.in_string)});
             // }
         }
         std.mem.set(u8, read_buf[bytes_read..], 0x20);
         // std.log.debug("read_buf {d}", .{read_buf});
         try p.parser.indexer.step(read_buf, &p.parser, pos);
-        try p.parser.indexer.finish(&p.parser, pos + STEP_SIZE, pos + bytes_read, STREAMING);
+        try p.parser.indexer.finish(&p.parser, pos + cmn.STEP_SIZE, pos + bytes_read, cmn.STREAMING);
     }
 
     pub fn iterate(p: *Parser) !Document {
@@ -1355,16 +1355,16 @@ pub const Parser = struct {
         position: [*]const u32,
         len_hint: u16,
     ) ![*]const u8 {
-        // println("peek() len_hint {} READ_BUF_CAP {}", .{ len_hint, READ_BUF_CAP });
+        // cmn.println("peek() len_hint {} READ_BUF_CAP {}", .{ len_hint, READ_BUF_CAP });
         if (len_hint > READ_BUF_CAP) return error.CAPACITY;
         const start_pos = position[0];
-        // println("\nTokenIterator: {} <= start {} end {} < read_buf_start_pos + len {}", .{ read_buf_start_pos, start, end, read_buf_start_pos + read_buf_len });
+        // cmn.println("\nTokenIterator: {} <= start {} end {} < read_buf_start_pos + len {}", .{ read_buf_start_pos, start, end, read_buf_start_pos + read_buf_len });
         if (parser.read_buf_start_pos <= start_pos and start_pos < parser.read_buf_start_pos + parser.read_buf_len) blk: {
             const offset = start_pos - parser.read_buf_start_pos;
             if (offset + len_hint > READ_BUF_CAP) break :blk;
             return @ptrCast([*]const u8, &parser.read_buf) + offset;
         }
-        // println("TokenIterator: seek and read()", .{});
+        // cmn.println("TokenIterator: seek and read()", .{});
         try parser.src.seekTo(start_pos);
         parser.read_buf_start_pos = start_pos;
         // not sure that 0xaa is the best value here but it does prevent false positives like [nul]

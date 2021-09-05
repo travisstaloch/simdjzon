@@ -6,7 +6,7 @@ const TapeType = dom.TapeType;
 const simdjzon = @import("simdjzon.zig");
 const dom = simdjzon.dom;
 const ondemand = simdjzon.ondemand;
-usingnamespace @import("common.zig");
+const cmn = @import("common.zig");
 
 const allr = testing.allocator;
 test "tape build" {
@@ -61,7 +61,7 @@ test "tape build" {
         const len = mem.bytesAsValue(u32, p[0..4]).*;
         p += 4;
         const str = std.mem.span(p);
-        println("{}:{}-'{s}' '{s}'", .{ j, len, str, p[0..10] });
+        cmn.println("{}:{}-'{s}' '{s}'", .{ j, len, str, p[0..10] });
         try testing.expectEqual(@intCast(u32, str.len), len);
         try testing.expectEqualStrings(expected_strings[j], str);
         p += str.len + 1;
@@ -72,22 +72,22 @@ test "tape build" {
         const expected = expecteds[i];
         const expected_type = TapeType.from_u64(expected);
         const expected_val = TapeType.extract_value(expected);
-        // println("{} : expected {s}:{}-{x}", .{ i, @tagName(expected_type), expected_val, expected });
+        // cmn.println("{} : expected {s}:{}-{x}", .{ i, @tagName(expected_type), expected_val, expected });
         const tape_item = parser.doc.tape.items[i];
         const tape_type = TapeType.from_u64(tape_item);
         const tape_val = TapeType.extract_value(tape_item);
-        // println("{} : actual   {s}:{}-{x}", .{ i, @tagName(tape_type), tape_val, tape_item });
-        // println("actual {}:{}", .{expected_type, expected_val});
-        // println("expected 0x{x} tape_item 0x{x}", .{ expected, tape_item });
+        // cmn.println("{} : actual   {s}:{}-{x}", .{ i, @tagName(tape_type), tape_val, tape_item });
+        // cmn.println("actual {}:{}", .{expected_type, expected_val});
+        // cmn.println("expected 0x{x} tape_item 0x{x}", .{ expected, tape_item });
         try testing.expectEqual(expected_type, tape_type);
 
-        // println("expected_val {} tape_val {}", .{ expected_val, tape_val });
+        // cmn.println("expected_val {} tape_val {}", .{ expected_val, tape_val });
         if (expected_type != .STRING)
             try testing.expectEqual(expected_val, tape_val);
 
         if (expected_type == .INT64) {
             i += 1;
-            println("{s} {}", .{ @tagName(expected_type), parser.doc.tape.items[i] });
+            cmn.println("{s} {}", .{ @tagName(expected_type), parser.doc.tape.items[i] });
             try testing.expectEqual(expecteds[i], parser.doc.tape.items[i]);
         }
     }
@@ -116,7 +116,7 @@ test "float" {
         defer parser.deinit();
         try parser.parse();
         // for (parser.doc.tape.items) |tape_item, i|
-        //     println("{}:{s} {}", .{ i, @tagName(TapeType.from_u64(tape_item)), TapeType.extract_value(tape_item) });
+        //     cmn.println("{}:{s} {}", .{ i, @tagName(TapeType.from_u64(tape_item)), TapeType.extract_value(tape_item) });
         try testing.expectEqual(
             TapeType.DOUBLE.encode_value(0),
             parser.doc.tape.items[2],
@@ -287,7 +287,7 @@ test "ondemand at_pointer" {
 // end README tests
 // ------------
 
-const E = Error || error{ TestExpectedEqual, TestUnexpectedResult, TestExpectedApproxEqAbs, TestUnexpectedError, TestExpectedError };
+const E = cmn.Error || error{ TestExpectedEqual, TestUnexpectedResult, TestExpectedApproxEqAbs, TestUnexpectedError, TestExpectedError };
 fn test_ondemand_doc(input: []const u8, expected: fn (doc: *ondemand.Document) E!void) !void {
     // std.debug.print("\n0123456789012345678901234567890123456789\n{s}\n", .{input});
     var src = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(input) };
