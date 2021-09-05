@@ -39,30 +39,6 @@ pub inline fn vpalignr(a: v.i64x2, b: v.i64x2, c: i8) v.i64x2 {
     return @"llvm.x86.vpalignr"(a, b, c);
 }
 
-extern fn @"llvm.ssub.sat.v8i8"(v.u8x8, v.u8x8) v.u8x8;
-pub inline fn _mm256_subs_epu8(a: v.u8x8, b: v.u8x8) v.u8x8 {
-    return @"llvm.ssub.sat.v8i8"(a, b);
-}
-
-extern fn @"llvm.usub.sat.v32i8"(v.i8x32, v.i8x32) v.i8x32;
-pub inline fn _mm512_subs_epu8(a: v.i8x32, b: v.i8x32) v.i8x32 {
-    return @"llvm.usub.sat.v32i8"(a, b);
-}
-
-extern fn @"llvm.usub.sat.v16i8"(v.u8x16, v.u8x16) v.u8x16;
-pub inline fn _mm_subs_epu8(a: v.u8x16, b: v.u8x16) v.u8x16 {
-    return @"llvm.usub.sat.v16i8"(a, b);
-}
-
-extern fn @"llvm.uadd.sat.i8"(u8, u8) u8;
-pub fn sat_add_u8(a: u8, b: u8) u8 {
-    return @"llvm.uadd.sat.i8"(a, b);
-}
-extern fn @"llvm.usub.sat.i8"(u8, u8) u8;
-pub fn sat_sub_u8(a: u8, b: u8) u8 {
-    return @"llvm.usub.sat.i8"(a, b);
-}
-
 extern fn @"llvm.x86.avx2.pmovmskb"(v.u8x32) u32;
 pub inline fn _mm256_movemask_epi8(a: v.u8x32) u32 {
     return @"llvm.x86.avx2.pmovmskb"(a);

@@ -234,8 +234,8 @@ const Utf8Checker = struct {
     }
 
     fn must_be_2_3_continuation(prev2: v.i8x32, prev3: v.i8x32) v.u8x32 {
-        const is_third_byte = llvm._mm512_subs_epu8(prev2, @bitCast(v.i8x32, @splat(32, @as(u8, 0b11100000 - 1)))); // Only 111_____ will be > 0
-        const is_fourth_byte = llvm._mm512_subs_epu8(prev3, @bitCast(v.i8x32, @splat(32, @as(u8, 0b11110000 - 1)))); // Only 1111____ will be > 0
+        const is_third_byte = @subWithSaturation(prev2, @bitCast(v.i8x32, @splat(32, @as(u8, 0b11100000 - 1)))); // Only 111_____ will be > 0
+        const is_fourth_byte = @subWithSaturation(prev3, @bitCast(v.i8x32, @splat(32, @as(u8, 0b11110000 - 1)))); // Only 1111____ will be > 0
         // Caller requires a bool (all 1's). All values resulting from the subtraction will be <= 64, so signed comparison is fine.
         const result = @bitCast(v.i1x32, (is_third_byte | is_fourth_byte) > @splat(32, @as(i8, 0)));
         return @bitCast(v.u8x32, @as(v.i8x32, result));
@@ -315,7 +315,7 @@ const Utf8Checker = struct {
             255, 255, 255, 255, 255, 0b11110000 - 1, 0b11100000 - 1, 0b11000000 - 1,
         };
         const max_value = @splat(32, @bitCast(i8, max_array[@as(i8, @sizeOf(@TypeOf(max_array)) - @sizeOf(v.u8x32))]));
-        return @bitCast(v.u8x32, llvm._mm512_subs_epu8(@bitCast(v.i8x32, input), max_value));
+        return @bitCast(v.u8x32, @subWithSaturation(@bitCast(v.i8x32, input), max_value));
     }
 };
 
