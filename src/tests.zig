@@ -624,3 +624,41 @@ test "ondemand raw_json_token" {
         }
     }.func);
 }
+
+test "twitter" {
+    const res = try std.ChildProcess.exec(.{
+        .allocator = allr,
+        .argv = &.{ "wget", "https://raw.githubusercontent.com/simdjson/simdjson/master/jsonexamples/twitter.json", "-O", "test/twitter.json" },
+    });
+    if (res.stderr.len > 0) {
+        allr.free(res.stderr);
+        if (res.term == .Exited)
+            if (res.term.Exited != 0) return error.UnexpectedExitCode;
+    }
+    if (res.stdout.len > 0) {
+        allr.free(res.stdout);
+        if (res.term == .Exited)
+            if (res.term.Exited != 0) return error.UnexpectedExitCode;
+    }
+
+    {
+        var parser = try dom.Parser.initFile(allr, "test/twitter.json", .{});
+        try parser.parse();
+        defer parser.deinit();
+        var tweets = parser.element();
+        const count = try (try tweets.at_pointer("/search_metadata/count")).get_uint64();
+        try testing.expectEqual(@as(u64, 100), count);
+    }
+    {
+        const filename = "test/twitter.json";
+        var file = try std.fs.cwd().openFile(filename, .{ .read = true });
+        defer file.close();
+        var src = std.io.StreamSource{ .file = file };
+        var parser = try ondemand.Parser.init(&src, allr, filename, .{});
+        defer parser.deinit();
+        var tweets = try parser.iterate();
+        const count = try (try tweets.at_pointer("/search_metadata/count")).get_int(u8);
+
+        try testing.expectEqual(@as(u8, 100), count);
+    }
+}
