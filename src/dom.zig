@@ -237,11 +237,11 @@ const Utf8Checker = struct {
         // do unsigned saturating subtraction, then interpret as signed so we can check if > 0 below
         const is_third_byte = @bitCast(
             v.i8x32,
-            @subWithSaturation(prev2, @splat(32, @as(u8, 0b11100000 - 1))),
+            prev2 -| @splat(32, @as(u8, 0b11100000 - 1)),
         ); // Only 111_____ will be > 0
         const is_fourth_byte = @bitCast(
             v.i8x32,
-            @subWithSaturation(prev3, @splat(32, @as(u8, 0b11110000 - 1))),
+            prev3 -| @splat(32, @as(u8, 0b11110000 - 1)),
         ); // Only 1111____ will be > 0
 
         // Caller requires a bool (all 1's). All values resulting from the subtraction will be <= 64, so signed comparison is fine.
@@ -323,7 +323,7 @@ const Utf8Checker = struct {
             255, 255, 255, 255, 255, 0b11110000 - 1, 0b11100000 - 1, 0b11000000 - 1,
         };
         const max_value = @splat(32, max_array[@sizeOf(@TypeOf(max_array)) - @sizeOf(v.u8x32)]);
-        return @subWithSaturation(input, max_value);
+        return input -| max_value;
     }
 };
 
