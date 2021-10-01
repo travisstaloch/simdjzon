@@ -626,14 +626,12 @@ test "ondemand raw_json_token" {
 }
 
 test "twitter" {
-    const output_filename = try std.fs.path.join(allr, &.{ "test", "twitter.json" });
-    defer allr.free(output_filename);
-    const json_url = "https://raw.githubusercontent.com/simdjson/simdjson/master/jsonexamples/twitter.json";
-    const argv: []const []const u8 = if (std.builtin.os.tag == .windows)
-        &.{ "Invoke-WebRequest", "-Uri", json_url, "-OutFile", output_filename }
+    const output_filename: []const u8 = if (std.builtin.os.tag == .windows)
+        "test\\twitter.json"
     else
-        &.{ "wget", json_url, "-O", output_filename };
-
+        "test/twitter.json";
+    const json_url = "https://raw.githubusercontent.com/simdjson/simdjson/master/jsonexamples/twitter.json";
+    const argv: []const []const u8 = &.{ "curl", "-fsS", "-o", output_filename, json_url };
     const res = try std.ChildProcess.exec(.{
         .allocator = allr,
         .argv = argv,
