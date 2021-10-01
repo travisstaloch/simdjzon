@@ -626,9 +626,17 @@ test "ondemand raw_json_token" {
 }
 
 test "twitter" {
+    const output_filename = try std.fs.path.join(allr, &.{ "test", "twitter.json" });
+    defer allr.free(output_filename);
+    const json_url = "https://raw.githubusercontent.com/simdjson/simdjson/master/jsonexamples/twitter.json";
+    const argv: []const []const u8 = if (std.builtin.os.tag == .windows)
+        &.{ "Invoke-WebRequest", "-Uri", json_url, "-OutFile", output_filename }
+    else
+        &.{ "wget", json_url, "-O", output_filename };
+
     const res = try std.ChildProcess.exec(.{
         .allocator = allr,
-        .argv = &.{ "wget", "https://raw.githubusercontent.com/simdjson/simdjson/master/jsonexamples/twitter.json", "-O", "test/twitter.json" },
+        .argv = argv,
     });
     if (res.stderr.len > 0) {
         allr.free(res.stderr);
@@ -642,7 +650,7 @@ test "twitter" {
     }
 
     {
-        var parser = try dom.Parser.initFile(allr, "test/twitter.json", .{});
+        var parser = try dom.Parser.initFile(allr, output_filename, .{});
         try parser.parse();
         defer parser.deinit();
         var tweets = parser.element();
@@ -650,11 +658,10 @@ test "twitter" {
         try testing.expectEqual(@as(u64, 100), count);
     }
     {
-        const filename = "test/twitter.json";
-        var file = try std.fs.cwd().openFile(filename, .{ .read = true });
+        var file = try std.fs.cwd().openFile(output_filename, .{ .read = true });
         defer file.close();
         var src = std.io.StreamSource{ .file = file };
-        var parser = try ondemand.Parser.init(&src, allr, filename, .{});
+        var parser = try ondemand.Parser.init(&src, allr, output_filename, .{});
         defer parser.deinit();
         var tweets = try parser.iterate();
         const count = try (try tweets.at_pointer("/search_metadata/count")).get_int(u8);
