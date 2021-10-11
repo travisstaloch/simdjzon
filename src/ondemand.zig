@@ -11,10 +11,11 @@ const string_parsing = @import("string_parsing.zig");
 const atom_parsing = @import("atom_parsing.zig");
 const CharUtils = string_parsing.CharUtils;
 const root = @import("root");
+const builtin = @import("builtin");
 // TODO: document that this is configurable in root
 pub const READ_BUF_CAP = if (@hasDecl(root, "read_buf_cap"))
     root.read_buf_cap
-else if (std.builtin.is_test)
+else if (builtin.is_test)
     mem.page_size
 else
     unreachable;
