@@ -626,7 +626,8 @@ test "ondemand raw_json_token" {
 }
 
 test "twitter" {
-    const output_filename: []const u8 = if (std.builtin.os.tag == .windows)
+    const builtin = @import("builtin");
+    const output_filename: []const u8 = if (builtin.os.tag == .windows)
         "test\\twitter.json"
     else
         "test/twitter.json";
