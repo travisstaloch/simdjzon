@@ -22,7 +22,7 @@ fn pad_with(comptime s: []const u8, comptime pad_byte: u8, comptime len: u8) [le
     return buf;
 }
 
-fn pad_with_alloc(s: []const u8, pad_byte: u8, len: u8, allocator: *mem.Allocator) []const u8 {
+fn pad_with_alloc(s: []const u8, pad_byte: u8, len: u8, allocator: mem.Allocator) []const u8 {
     var buf = allocator.alloc(u8, len) catch return s;
     std.mem.set(u8, buf, pad_byte);
     std.mem.copy(u8, buf, s[0..std.math.min(s.len, buf.len)]);
@@ -62,13 +62,13 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
     if (!common.debug) return;
 
     var log_fba = std.heap.FixedBufferAllocator.init(&log_buf);
-    const depth_padding = pad_with_alloc("", ' ', @intCast(u8, if (log.depth < 0x0f) log.depth * 2 else 0xff), &log_fba.allocator);
+    const depth_padding = pad_with_alloc("", ' ', @intCast(u8, if (log.depth < 0x0f) log.depth * 2 else 0xff), log_fba.allocator());
     const titles = std.fmt.allocPrint(
-        &log_fba.allocator,
+        log_fba.allocator(),
         "{s}{s}{s}",
         .{ depth_padding, title_prefix, title },
     ) catch return;
-    const p1 = pad_with_alloc(titles, ' ', LOG_EVENT_LEN, &log_fba.allocator);
+    const p1 = pad_with_alloc(titles, ' ', LOG_EVENT_LEN, log_fba.allocator());
     print("| {s} ", .{p1});
     const current_index = if (iter.at_beginning()) null else iter.next_structural() - 1;
     const next_index = iter.next_structural();
@@ -88,7 +88,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
                 else
                     c.* = printable_char(c.*);
             }
-            break :blk pad_with_alloc(&log_buf2, ' ', LOG_BUFFER_LEN, &log_fba.allocator);
+            break :blk pad_with_alloc(&log_buf2, ' ', LOG_BUFFER_LEN, log_fba.allocator());
         } else {
             break :blk &pad_with("", ' ', LOG_BUFFER_LEN);
         }
@@ -110,7 +110,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
             else
                 c.* = printable_char(c.*);
         }
-        break :blk pad_with_alloc(&log_buf2, ' ', LOG_SMALL_BUFFER_LEN, &log_fba.allocator);
+        break :blk pad_with_alloc(&log_buf2, ' ', LOG_SMALL_BUFFER_LEN, log_fba.allocator());
     };
     print("| {s} ", .{next_content});
 
@@ -120,7 +120,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
                 std.fmt.bufPrint(&log_buf2, "{}", .{ci[0]}) catch return,
                 ' ',
                 LOG_INDEX_LEN,
-                &log_fba.allocator,
+                log_fba.allocator(),
             ),
         });
     } else {

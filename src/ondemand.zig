@@ -21,7 +21,7 @@ else
     unreachable;
 
 const GetOptions = struct {
-    allocator: ?*mem.Allocator = null,
+    allocator: ?mem.Allocator = null,
 };
 
 pub const Value = struct {
@@ -50,7 +50,7 @@ pub const Value = struct {
     pub fn get_string(v: *Value, comptime T: type, buf: []u8) !T {
         return v.iter.get_string(T, buf);
     }
-    pub fn get_string_alloc(v: *Value, comptime T: type, allocator: *mem.Allocator) !T {
+    pub fn get_string_alloc(v: *Value, comptime T: type, allocator: mem.Allocator) !T {
         return v.iter.get_string_alloc(T, allocator);
     }
     pub fn get_double(v: *Value) !f64 {
@@ -1078,7 +1078,7 @@ pub const ValueIterator = struct {
         const peek_len = try std.math.cast(u16, std.math.min(READ_BUF_CAP, dest.len));
         return unescape(T, try vi.get_raw_json_string(peek_len), dest.ptr);
     }
-    pub fn get_string_alloc(vi: *ValueIterator, comptime T: type, allocator: *mem.Allocator) !T {
+    pub fn get_string_alloc(vi: *ValueIterator, comptime T: type, allocator: mem.Allocator) !T {
         const str_len = try std.math.cast(u16, vi.peek_start_length());
         if (str_len + 2 > READ_BUF_CAP) return error.CAPACITY;
         const start = try vi.get_raw_json_string(str_len);
@@ -1138,7 +1138,7 @@ pub const ValueIterator = struct {
     fn get_root_string(vi: *ValueIterator, comptime T: type, dest: []u8) !T {
         return vi.get_string(T, dest);
     }
-    fn get_root_string_alloc(vi: *ValueIterator, comptime T: type, allocator: *mem.Allocator) !T {
+    fn get_root_string_alloc(vi: *ValueIterator, comptime T: type, allocator: mem.Allocator) !T {
         return vi.get_string_alloc(T, allocator);
     }
     fn get_root_bool(vi: *ValueIterator) !bool {
@@ -1238,7 +1238,7 @@ pub const Document = struct {
     pub fn get_string(doc: *Document, comptime T: type, buf: []u8) !T {
         return doc.get_root_value_iterator().get_root_string(T, buf);
     }
-    pub fn get_string_alloc(doc: *Document, comptime T: type, allocator: *mem.Allocator) !T {
+    pub fn get_string_alloc(doc: *Document, comptime T: type, allocator: mem.Allocator) !T {
         return doc.get_root_value_iterator().get_root_string_alloc(T, allocator);
     }
     pub fn get_double(doc: *Document) !f64 {
@@ -1291,7 +1291,7 @@ pub const Parser = struct {
     read_buf_start_pos: u32,
     log: Logger = .{ .depth = 0 },
 
-    pub fn init(src: *std.io.StreamSource, allocator: *mem.Allocator, filename: []const u8, options: dom.Parser.Options) !Parser {
+    pub fn init(src: *std.io.StreamSource, allocator: mem.Allocator, filename: []const u8, options: dom.Parser.Options) !Parser {
         var result = Parser{
             .parser = .{
                 .allocator = allocator,
