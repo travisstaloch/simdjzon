@@ -12,7 +12,7 @@ pub const read_buf_cap = build_options.ondemand_read_cap;
 pub fn domMain() !u8 {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    const allocator = &arena.allocator;
+    const allocator = arena.allocator();
     var parser: dom.Parser = undefined;
 
     if (os.argv.len == 1) {
@@ -42,7 +42,7 @@ pub fn domMain() !u8 {
 pub fn ondemandMain() !u8 {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    const allocator = &arena.allocator;
+    const allocator = arena.allocator();
     // const allocator = std.heap.c_allocator;
     var parser: ondemand.Parser = undefined;
     defer if (parser.src.* == .file) parser.src.file.close();

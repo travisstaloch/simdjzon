@@ -24,7 +24,7 @@ pub const Document = struct {
         };
     }
 
-    pub fn allocate(document: *Document, allocator: *mem.Allocator, capacity: u32) !void {
+    pub fn allocate(document: *Document, allocator: mem.Allocator, capacity: u32) !void {
         if (capacity == 0) return;
 
         // a pathological input like "[[[[..." would generate capacity tape elements, so
@@ -45,7 +45,7 @@ pub const Document = struct {
         document.string_buf.len = 0;
     }
 
-    pub fn deinit(doc: *Document, allocator: *mem.Allocator) void {
+    pub fn deinit(doc: *Document, allocator: mem.Allocator) void {
         doc.tape.deinit(allocator);
         doc.string_buf.len = doc.string_buf_cap;
         allocator.free(doc.string_buf[0..doc.string_buf_cap]);
@@ -1102,7 +1102,7 @@ pub const TapeBuilder = struct {
 
 pub const Parser = struct {
     filename: []const u8,
-    allocator: *mem.Allocator,
+    allocator: mem.Allocator,
     prev_escaped: u64 = 0,
     prev_in_string: u64 = 0,
     prev_scalar: u64 = 0,
@@ -1119,7 +1119,7 @@ pub const Parser = struct {
         max_depth: u16 = cmn.DEFAULT_MAX_DEPTH,
     };
 
-    pub fn initFile(allocator: *mem.Allocator, filename: []const u8, options: Options) !Parser {
+    pub fn initFile(allocator: mem.Allocator, filename: []const u8, options: Options) !Parser {
         var parser = Parser{
             .filename = filename,
             .allocator = allocator,
@@ -1139,7 +1139,7 @@ pub const Parser = struct {
 
     const ascii_space = 0x20;
 
-    pub fn initFixedBuffer(allocator: *mem.Allocator, input: []const u8, options: Options) !Parser {
+    pub fn initFixedBuffer(allocator: mem.Allocator, input: []const u8, options: Options) !Parser {
         var parser = Parser{
             .filename = "<fixed buffer>",
             .allocator = allocator,
