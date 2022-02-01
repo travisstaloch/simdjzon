@@ -1167,7 +1167,7 @@ pub const Parser = struct {
     }
 
     fn read_file(parser: *Parser, filename: []const u8) !u32 {
-        var f = try std.fs.cwd().openFile(filename, .{ .read = true });
+        var f = try std.fs.cwd().openFile(filename, .{ .mode = .read_only });
         defer f.close();
         const len = try std.math.cast(u32, try f.getEndPos());
         if (parser.bytes.len < len) {

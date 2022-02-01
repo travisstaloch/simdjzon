@@ -54,7 +54,7 @@ pub fn ondemandMain() !u8 {
         parser = try ondemand.Parser.init(&src, allocator, "<stdin>", .{});
     } else if (os.argv.len == 2) {
         const filepath = std.mem.span(os.argv[1]);
-        const file = try std.fs.cwd().openFile(filepath, .{ .read = true });
+        const file = try std.fs.cwd().openFile(filepath, .{ .mode = .read_only});
 
         var src = std.io.StreamSource{ .file = file };
         parser = try ondemand.Parser.init(&src, allocator, filepath, .{});

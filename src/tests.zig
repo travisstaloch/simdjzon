@@ -657,7 +657,7 @@ test "twitter" {
         try testing.expectEqual(@as(u64, 100), count);
     }
     {
-        var file = try std.fs.cwd().openFile(output_filename, .{ .read = true });
+        var file = try std.fs.cwd().openFile(output_filename, .{ .mode = .read_only });
         defer file.close();
         var src = std.io.StreamSource{ .file = file };
         var parser = try ondemand.Parser.init(&src, allr, output_filename, .{});
