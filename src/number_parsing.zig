@@ -905,8 +905,8 @@ inline fn compute_float_64(power: i64, _i: u64, negative: bool, d: *f64) bool {
     const exponent: i64 = (((152170 + 65536) * power) >> 16) + 1024 + 63;
 
     // We want the most significant bit of i to be 1. Shift if needed.
-    var lz = @intCast(u6, @clz(u64, i));
-    i <<= lz;
+    var lz = @intCast(u7, @clz(u64, i));
+    i <<= @intCast(u6, lz);
 
     // We are going to need to do some 64-bit arithmetic to get a precise product.
     // We use a table lookup approach.
@@ -979,7 +979,7 @@ inline fn compute_float_64(power: i64, _i: u64, negative: bool, d: *f64) bool {
     ///////
     const upperbit = @intCast(u6, upper >> 63);
     var mantissa: u64 = upper >> (upperbit + 9);
-    lz +%= @intCast(u6, 1 ^ upperbit);
+    lz +%= 1 ^ upperbit;
 
     // Here we have mantissa < (1<<54).
     var real_exponent: i64 = exponent - lz;

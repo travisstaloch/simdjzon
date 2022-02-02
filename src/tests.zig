@@ -112,7 +112,7 @@ test "float" {
         try testing.expectApproxEqAbs(@as(f64, 123.456), d, 0.000000001);
     }
     {
-        var parser = try dom.Parser.initFixedBuffer(allr, "[-0.000000000000000000000000000000000000000000000000000000000000000000000000000001]", .{});
+        var parser = try dom.Parser.initFixedBuffer(allr, "[-0.000000000000000000000000000000000000000000000000000000000000000000000000000001,0.1,0.01]", .{});
         defer parser.deinit();
         try parser.parse();
         // for (parser.doc.tape.items) |tape_item, i|
@@ -124,6 +124,24 @@ test "float" {
         try testing.expectApproxEqAbs(
             @as(f64, 0.000000000000000000000000000000000000000000000000000000000000000000000000000001),
             @bitCast(f64, parser.doc.tape.items[3]),
+            std.math.f64_epsilon,
+        );
+        try testing.expectEqual(
+            TapeType.DOUBLE.encode_value(0),
+            parser.doc.tape.items[4],
+        );
+        try testing.expectApproxEqAbs(
+            @as(f64, 0.1),
+            @bitCast(f64, parser.doc.tape.items[5]),
+            std.math.f64_epsilon,
+        );
+        try testing.expectEqual(
+            TapeType.DOUBLE.encode_value(0),
+            parser.doc.tape.items[6],
+        );
+        try testing.expectApproxEqAbs(
+            @as(f64, 0.01),
+            @bitCast(f64, parser.doc.tape.items[7]),
             std.math.f64_epsilon,
         );
     }
