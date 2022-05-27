@@ -1,6 +1,7 @@
 #include <immintrin.h>
 #include <emmintrin.h>
 // #include <smmintrin.h>
+#include <stdint.h>
 
 
 // __m256i mm256_cmpgt_epi8(__m256i a, __m256i b) {
@@ -37,3 +38,22 @@ __m256i _prev3(__m256i a, __m256i b) {
 //     __m256i must23_80 = _mm256_and_si256(must23, _mm256_set1_epi8(0x80));
 //     return must23_80 ^ sc;
 // }
+
+
+uint64_t prefix_xor(const uint64_t bitmask) {
+  // There should be no such thing with a processor supporting avx2
+  // but not clmul.
+    __m128i all_ones = _mm_set1_epi8('\xFF');
+    __m128i result = _mm_clmulepi64_si128(_mm_set_epi64x(0ULL, bitmask), all_ones, 0);
+    return _mm_cvtsi128_si64(result);
+}
+
+__m256i w_mm256_shuffle_epi8(__m256i a, __m256i b) {
+    return _mm256_shuffle_epi8(a, b);
+}
+// __m256i _mm256_shuffle_epi8(__m256i a, __m256i b);
+
+// uint32_t _mm256_movemask_epi8(__m256i a);
+uint32_t w_mm256_movemask_epi8(__m256i a) {
+    return _mm256_movemask_epi8(a);
+}

@@ -171,7 +171,7 @@ const Utf8Checker = struct {
             // 1111____ ________ <four+ byte lead in byte 1>
             TOO_SHORT | TOO_LARGE | TOO_LARGE_1000 | OVERLONG_4,
         } ** 2;
-        const byte_1_high = llvm.shuffleEpi8(tbl1, byte_1_high_0);
+        const byte_1_high = llvm.mm256_shuffle_epi8(tbl1, byte_1_high_0);
         const CARRY: u8 = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
         const byte_1_low0 = prev1 & @splat(32, @as(u8, 0x0F));
         
@@ -203,7 +203,7 @@ const Utf8Checker = struct {
             CARRY | TOO_LARGE | TOO_LARGE_1000,
             CARRY | TOO_LARGE | TOO_LARGE_1000,
         } ** 2;
-        const byte_1_low = llvm.shuffleEpi8(tbl2, byte_1_low0);
+        const byte_1_low = llvm.mm256_shuffle_epi8(tbl2, byte_1_low0);
 
         const byte_2_high_0 = input >> @splat(32, @as(u3, 4));
         const tbl3 = [16]u8{
@@ -219,7 +219,7 @@ const Utf8Checker = struct {
             // ________ 11______
             TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
         } ** 2;
-        const byte_2_high = llvm.shuffleEpi8(tbl3, byte_2_high_0);
+        const byte_2_high = llvm.mm256_shuffle_epi8(tbl3, byte_2_high_0);
         return (byte_1_high & byte_1_low & byte_2_high);
     }
     // zig fmt: on
@@ -274,7 +274,7 @@ const Utf8Checker = struct {
         const a: v.u8x32 = bytes[0..32].*;
         const b: v.u8x32 = bytes[32..64].*;
 
-        return llvm._mm256_movemask_epi8(a | b) == 0;
+        return llvm.mm256_movemask_epi8(a | b) == 0;
     }
 
     inline fn check_next_input(checker: *Utf8Checker, input: v.u8x64) void {
@@ -386,15 +386,15 @@ const CharacterBlock = struct {
         const chunk0: v.u8x32 = in[0..32].*;
         const chunk1: v.u8x32 = in[32..64].*;
         const wss: [2]v.u8x32 = .{
-            llvm.shuffleEpi8(whitespace_table, chunk0),
-            llvm.shuffleEpi8(whitespace_table, chunk1),
+            llvm.mm256_shuffle_epi8(whitespace_table, chunk0),
+            llvm.mm256_shuffle_epi8(whitespace_table, chunk1),
         };
         const whitespace = input_vec == @bitCast(v.u8x64, wss);
         // Turn [ and ] into { and }
         const curlified = input_vec | @splat(64, @as(u8, 0x20));
         const ops: [2]v.u8x32 = .{
-            llvm.shuffleEpi8(op_table, chunk0),
-            llvm.shuffleEpi8(op_table, chunk1),
+            llvm.mm256_shuffle_epi8(op_table, chunk0),
+            llvm.mm256_shuffle_epi8(op_table, chunk1),
         };
         const op = curlified == @bitCast(v.u8x64, ops);
 
@@ -1222,13 +1222,11 @@ pub const Parser = struct {
         // Then we xor with prev_in_string: if we were in a string already, its effect is flipped
         // (characters inside strings are outside, and characters outside strings are inside).
         //
-        const ones: v.u64x2 = [1]u64{std.math.maxInt(u64)} ** 2;
-        var in_string = llvm.carrylessMul(.{ quote, 0 }, ones)[0];
+        const in_string = llvm.prefix_xor(quote) ^ parser.prev_in_string;
         // println("{b:0>64} | quote a", .{@bitReverse(u64, quote)});
         // println("{b:0>64} | ones[0]", .{@bitReverse(u64, ones[0])});
         // println("{b:0>64} | in_string a", .{@bitReverse(u64, in_string)});
         // println("{b:0>64} | prev_in_string a", .{@bitReverse(u64, parser.prev_in_string)});
-        in_string ^= parser.prev_in_string;
         // println("{b:0>64} | in_string b", .{@bitReverse(u64, in_string)});
 
         //
