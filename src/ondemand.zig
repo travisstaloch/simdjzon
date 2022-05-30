@@ -170,7 +170,7 @@ pub const Value = struct {
     }
 
     pub fn raw_json_token(val: *Value) ![]const u8 {
-        const len = try std.math.cast(u16, val.iter.peek_start_length());
+        const len = std.math.cast(u16, val.iter.peek_start_length()) orelse return error.Overflow;
         const ptr = try val.iter.peek_start(len);
         return ptr[0..len];
     }
@@ -768,10 +768,10 @@ pub const ValueIterator = struct {
 
     fn field_key(vi: *ValueIterator) ![*]const u8 {
         vi.assert_at_next();
-        var key = try vi.iter.advance(try std.math.cast(u16, std.math.min(
+        var key = try vi.iter.advance(std.math.cast(u16, std.math.min(
             READ_BUF_CAP,
             vi.peek_start_length(),
-        )));
+        )) orelse return error.Overflow);
         if (key[0] != '"')
             return vi.iter.report_error(error.TAPE_ERROR, "Object key is not a string");
         return key;
@@ -1057,14 +1057,14 @@ pub const ValueIterator = struct {
     }
 
     pub fn get_int(vi: *ValueIterator, comptime T: type) !T {
-        const peek_len = comptime try std.math.cast(u16, std.math.log10(@as(usize, std.math.maxInt(T))));
+        const peek_len = comptime std.math.cast(u16, std.math.log10(@as(usize, std.math.maxInt(T)))) orelse return error.Overflow;
         const u64int = try number_parsing.parse_integer(
             try vi.advance_non_root_scalar(@typeName(T), peek_len),
         );
         return std.math.cast(T, if (@typeInfo(T).Int.signedness == .signed)
             @bitCast(i64, u64int)
         else
-            u64int);
+            u64int) orelse return error.Overflow;
     }
 
     pub fn unescape(comptime T: type, src: [*]const u8, dst: [*]u8) !T {
@@ -1075,11 +1075,11 @@ pub const ValueIterator = struct {
 
     pub fn get_string(vi: *ValueIterator, comptime T: type, dest: []u8) !T {
         if (dest.len + 2 < vi.peek_start_length()) return error.CAPACITY;
-        const peek_len = try std.math.cast(u16, std.math.min(READ_BUF_CAP, dest.len));
+        const peek_len = std.math.cast(u16, std.math.min(READ_BUF_CAP, dest.len)) orelse return error.Overflow;
         return unescape(T, try vi.get_raw_json_string(peek_len), dest.ptr);
     }
     pub fn get_string_alloc(vi: *ValueIterator, comptime T: type, allocator: mem.Allocator) !T {
-        const str_len = try std.math.cast(u16, vi.peek_start_length());
+        const str_len = std.math.cast(u16, vi.peek_start_length()) orelse return error.Overflow;
         if (str_len + 2 > READ_BUF_CAP) return error.CAPACITY;
         const start = try vi.get_raw_json_string(str_len);
         return string_parsing.parse_string_alloc(T, start, allocator, str_len);
@@ -1115,13 +1115,13 @@ pub const ValueIterator = struct {
     }
     fn get_root_int(vi: *ValueIterator, comptime T: type) !T {
         const max_len = vi.peek_start_length();
-        const json = try vi.advance_root_scalar("int64", try std.math.cast(u16, max_len));
+        const json = try vi.advance_root_scalar("int64", std.math.cast(u16, max_len) orelse return error.Overflow);
         var tmpbuf: [20 + 1]u8 = undefined; // -<19 digits> is the longest possible integer
         if (!Iterator.copy_to_buffer(json, max_len, tmpbuf.len, &tmpbuf)) {
             vi.iter.parser.log.err_fmt(&vi.iter, "Root number more than 20 characters. start_position {} depth {}", .{ vi.start_position[0], vi.depth });
             return error.NUMBER_ERROR;
         }
-        return std.math.cast(T, try number_parsing.parse_integer(&tmpbuf));
+        return std.math.cast(T, try number_parsing.parse_integer(&tmpbuf)) orelse return error.Overflow;
     }
     fn get_root_double(vi: *ValueIterator) !f64 {
         const max_len = vi.peek_start_length();
@@ -1274,7 +1274,7 @@ pub const Document = struct {
     }
     pub fn raw_json_token(doc: *Document) ![]const u8 {
         var iter = doc.get_root_value_iterator();
-        const len = try std.math.cast(u16, iter.peek_start_length());
+        const len = std.math.cast(u16, iter.peek_start_length()) orelse return error.Overflow;
         const ptr = try iter.peek_start(len);
         return ptr[0..len];
     }
@@ -1302,7 +1302,7 @@ pub const Parser = struct {
                 .max_depth = options.max_depth,
             },
             .src = src,
-            .end_pos = try std.math.cast(u32, try src.getEndPos()),
+            .end_pos = std.math.cast(u32, try src.getEndPos()) orelse return error.Overflow,
             .read_buf_start_pos = 0,
             .read_buf_len = 0,
         };

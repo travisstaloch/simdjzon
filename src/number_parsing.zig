@@ -159,8 +159,8 @@ fn parse_decimal(src: [*]const u8, p: *[*]const u8, i: *u64, exponent: *i64) !vo
     while (parse_digit(u64, p.*[0], i)) p.* += 1;
 
     exponent.* =
-        (try std.math.cast(i64, @ptrToInt(first_after_period))) -
-        (try std.math.cast(i64, @ptrToInt(p.*)));
+        (std.math.cast(i64, @ptrToInt(first_after_period)) orelse return error.Overflow) -
+        (std.math.cast(i64, @ptrToInt(p.*)) orelse return error.Overflow);
     // std.log.debug("exponent {} firstap {*} p {*}", .{ exponent.*, first_after_period, p });
     // Decimal without digits (123.) is illegal
     if (exponent.* == 0) {

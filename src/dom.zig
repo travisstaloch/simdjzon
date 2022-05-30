@@ -511,7 +511,7 @@ pub const StructuralIndexer = struct {
         }
 
         //   parser.n_structural_indexes = uint32_t(indexer.tail - parser.structural_indexes.get());
-        parser.n_structural_indexes = try std.math.cast(u32, si.bit_indexer.tail.items.len);
+        parser.n_structural_indexes = std.math.cast(u32, si.bit_indexer.tail.items.len) orelse return error.Overflow;
         // ***
         // * This is related to https://github.com/simdjson/simdjson/issues/906
         // * Basically, we want to make sure that if the parsing continues beyond the last (valid)
@@ -1149,7 +1149,7 @@ pub const Parser = struct {
             .open_containers = std.MultiArrayList(OpenContainerInfo){},
             .max_depth = options.max_depth,
         };
-        parser.input_len = try std.math.cast(u32, input.len);
+        parser.input_len = std.math.cast(u32, input.len) orelse return error.Overflow;
         const capacity = parser.input_len;
         const max_structures = cmn.ROUNDUP_N(capacity, 64) + 2 + 7;
         const paddedlen = try std.math.add(u32, capacity, cmn.SIMDJSON_PADDING);
@@ -1169,7 +1169,7 @@ pub const Parser = struct {
     fn read_file(parser: *Parser, filename: []const u8) !u32 {
         var f = try std.fs.cwd().openFile(filename, .{ .mode = .read_only });
         defer f.close();
-        const len = try std.math.cast(u32, try f.getEndPos());
+        const len = std.math.cast(u32, try f.getEndPos()) orelse return error.Overflow;
         if (parser.bytes.len < len) {
             const paddedlen = try std.math.add(u32, len, cmn.SIMDJSON_PADDING);
             parser.bytes = try parser.allocator.realloc(parser.bytes, paddedlen);
@@ -1557,10 +1557,10 @@ const Element = struct {
                 switch (info.Pointer.size) {
                     .One => {
                         switch (child_info) {
-                            .Int => out.* = try std.math.cast(C, try if (child_info.Int.signedness == .signed)
+                            .Int => out.* = std.math.cast(C, try if (child_info.Int.signedness == .signed)
                                 ele.get_int64()
                             else
-                                ele.get_uint64()),
+                                ele.get_uint64()) orelse return error.Overflow,
                             .Float => out.* = @floatCast(C, try ele.get_double()),
                             .Bool => out.* = try ele.get_bool(),
                             .Optional => out.* = if (ele.is(.NULL))

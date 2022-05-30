@@ -34,7 +34,7 @@ pub inline fn ptr_diff(comptime T: type, p1: anytype, p2: anytype) !T {
     const V = std.meta.Child(@TypeOf(p2));
     if (@sizeOf(U) != @sizeOf(V)) @compileError("ptr_diff: mismatched child sizes");
     const diff = @ptrToInt(p1) - @ptrToInt(p2);
-    return std.math.cast(T, diff / (@sizeOf(U)));
+    return std.math.cast(T, diff / (@sizeOf(U))) orelse return error.Overflow;
 }
 
 pub const FileError = std.fs.File.OpenError || std.fs.File.ReadError || std.fs.File.SeekError;
