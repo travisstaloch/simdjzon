@@ -93,7 +93,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
             break :blk &pad_with("", ' ', LOG_BUFFER_LEN);
         }
     };
-    print("| {s} ", .{content});
+    print("| {?s} ", .{content});
     const next_content = blk: {
         if (is_ondemand) {
             const len = std.math.min(iter.parser.read_buf_len, log_buf2.len);
@@ -112,7 +112,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
         }
         break :blk pad_with_alloc(&log_buf2, ' ', LOG_SMALL_BUFFER_LEN, log_fba.allocator());
     };
-    print("| {s} ", .{next_content});
+    print("| {?s} ", .{next_content});
 
     if (current_index) |ci| {
         print("| {s} ", .{
