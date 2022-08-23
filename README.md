@@ -1,4 +1,4 @@
-:warning: **Under heavy development.  Expect bugs and/or missing features** :warning:
+:warning: **Work in progress.  Expect bugs and/or missing features** :warning:
 
 # simdjzon
 This is a port of [simdjson](https://github.com/simdjson/simdjson), a high performance JSON parser developed by Daniel Lemire and Geoff Langdale to [zig](https://ziglang.org/).  
