@@ -6,6 +6,7 @@ fn setup(step: *std.build.LibExeObjStep, mode: std.builtin.Mode, target: anytype
     step.linkLibC();
     step.setBuildMode(mode);
     step.addOptions("build_options", options);
+    step.use_stage1 = true;
 }
 
 pub fn build(b: *std.build.Builder) void {
