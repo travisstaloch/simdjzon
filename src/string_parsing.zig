@@ -161,9 +161,9 @@ pub inline fn parse_string(src_: [*]const u8, dst_: [*]u8) ?[*]u8 {
     unreachable;
 }
 
-/// allocates and returns an unescaped a string from src, stopping at a final unescaped quote. 
+/// allocates and returns an unescaped a string from src, stopping at a final unescaped quote.
 /// e.g., if src points at 'joe"', returns 'joe'.
-/// caller owns the memory. 
+/// caller owns the memory.
 pub inline fn parse_string_alloc(comptime T: type, src_: [*]const u8, allocator: mem.Allocator, str_len: u16) !T {
     var src = src_;
     var dst_slice = try allocator.alloc(u8, str_len);
@@ -249,10 +249,10 @@ pub const BackslashAndQuote = struct {
         return ((bsq.quote_bits -% 1) & bsq.bs_bits) != 0;
     }
     fn quote_index(bsq: BackslashAndQuote) u32 {
-        return @ctz(u32, bsq.quote_bits);
+        return @ctz(bsq.quote_bits);
     }
     fn backslash_index(bsq: BackslashAndQuote) u32 {
-        return @ctz(u32, bsq.bs_bits);
+        return @ctz(bsq.bs_bits);
     }
 
     pub fn format(value: BackslashAndQuote, comptime _: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {

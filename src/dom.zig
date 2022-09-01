@@ -65,13 +65,13 @@ const BitIndexer = struct {
         // In some instances, the next branch is expensive because it is mispredicted.
         // Unfortunately, in other cases,
         // it helps tremendously.
-        cmn.print("{b:0>64} | bits", .{@bitReverse(u64, bits_)});
+        cmn.print("{b:0>64} | bits", .{@bitReverse(bits_)});
         if (bits == 0) {
             cmn.println("", .{});
             return;
         }
         const reader_pos = @intCast(i32, reader_pos_ - 64); //  this function is always passed last bits so reader_pos will be ahead by 64
-        const cnt = @popCount(u64, bits);
+        const cnt = @popCount(bits);
         cmn.println(", reader_pos {}", .{reader_pos});
         const start_count = indexer.tail.items.len;
 
@@ -79,7 +79,7 @@ const BitIndexer = struct {
         {
             var new_items = indexer.tail.addManyAsArrayAssumeCapacity(8);
             for (new_items) |*ptr| {
-                ptr.* = @intCast(u32, reader_pos + @ctz(u64, bits));
+                ptr.* = @intCast(u32, reader_pos + @ctz(bits));
                 bits = (bits -% 1) & bits;
                 // std.log.debug("bits {}", .{bits});
             }
@@ -90,7 +90,7 @@ const BitIndexer = struct {
         if (cnt > 8) {
             var new_items = indexer.tail.addManyAsArrayAssumeCapacity(8);
             for (new_items) |*ptr| {
-                ptr.* = @intCast(u32, reader_pos + @ctz(u64, bits));
+                ptr.* = @intCast(u32, reader_pos + @ctz(bits));
                 bits = (bits -% 1) & bits;
             }
         }
@@ -101,7 +101,7 @@ const BitIndexer = struct {
         if (cnt > 16) {
             var i: usize = 16;
             while (true) {
-                indexer.tail.appendAssumeCapacity(@intCast(u32, reader_pos + @ctz(u64, bits)));
+                indexer.tail.appendAssumeCapacity(@intCast(u32, reader_pos + @ctz(bits)));
                 bits = (bits -% 1) & bits;
                 i += 1;
                 if (i >= cnt) break;
