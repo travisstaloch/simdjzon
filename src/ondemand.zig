@@ -489,8 +489,6 @@ pub const Iterator = struct {
     }
 
     fn report_error(iter: *Iterator, err: cmn.Error, message: []const u8) cmn.Error {
-        _ = message;
-        _ = iter;
         assert(err != error.UNINITIALIZED and err != error.INCORRECT_TYPE and err != error.NO_SUCH_FIELD);
         iter.parser.log.err(iter, message);
 
@@ -704,7 +702,6 @@ pub const ValueIterator = struct {
         return vi.iter.advance(peek_len);
     }
     fn incorrect_type_error(vi: *ValueIterator, message: []const u8) cmn.Error {
-        _ = message;
         vi.iter.parser.log.err_fmt(&vi.iter, "{s}.  start_position {} depth {}", .{ message, vi.start_position[0], vi.depth });
         return error.INCORRECT_TYPE;
     }
