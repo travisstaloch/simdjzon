@@ -1046,8 +1046,8 @@ pub const TapeBuilder = struct {
             'f' => tb.visit_false_atom(iter, value),
             'n' => tb.visit_null_atom(iter, value),
             '-', '0'...'9' => tb.visit_number(iter, value),
-            else => |c| blk: {
-                iter.log.err_fmt(iter, "Non-value found when value was expected.  Value: '{c}' - (0x{x}:{})", .{ c, c, c });
+            else => |ch| blk: {
+                iter.log.err_fmt(iter, "Non-value found when value was expected.  Value: '{c}' - (0x{x}:{})", .{ ch, ch, ch });
                 break :blk error.TAPE_ERROR;
             },
         };
