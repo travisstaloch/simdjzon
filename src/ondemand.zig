@@ -110,7 +110,7 @@ pub const Value = struct {
                                                 while (try iter.next()) |*arr_ele| {
                                                     try arr_ele.get(try list.addOne(allocator), options);
                                                 }
-                                                out.* = list.toOwnedSlice(allocator);
+                                                out.* = try list.toOwnedSlice(allocator);
                                             },
                                             .string => out.* = try val.get_string_alloc(C, allocator),
                                             else => return error.INCORRECT_TYPE,
