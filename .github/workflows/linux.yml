@@ -1,9 +1,9 @@
 name: Linux
 on:
   push:
-    branches: [ main ]
+    branches: [ main, zig-0.10.0 ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, zig-0.10.0 ]
   schedule:
     - cron: "0 7 * * *"
 
@@ -21,7 +21,7 @@ jobs:
     - name: Setup Zig
       uses: goto-bus-stop/setup-zig@v1.3.0
       with:
-        version: master
+        version: 0.10.0
 
     - run: zig build test
     - run: zig build test -Dstep-128
