@@ -13,14 +13,15 @@ pub fn domMain() !u8 {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
+    const args = try std.process.argsAlloc(allocator);
     var parser: dom.Parser = undefined;
 
-    if (os.argv.len == 1) {
+    if (args.len == 1) {
         var stdin = std.io.getStdIn().reader();
         const input = try stdin.readAllAlloc(allocator, std.math.maxInt(u32));
         parser = try dom.Parser.initFixedBuffer(allocator, input, .{});
-    } else if (os.argv.len == 2) {
-        const filename = std.mem.span(os.argv[1]);
+    } else if (args.len == 2) {
+        const filename = std.mem.span(args[1]);
         parser = try dom.Parser.initFile(allocator, filename, .{});
     } else {
         std.log.err("Too many arguments.  Please provide input via filename or stdin", .{});
@@ -44,16 +45,17 @@ pub fn ondemandMain() !u8 {
     defer arena.deinit();
     const allocator = arena.allocator();
     // const allocator = std.heap.c_allocator;
+    const args = try std.process.argsAlloc(allocator);
     var parser: ondemand.Parser = undefined;
     defer if (parser.src.* == .file) parser.src.file.close();
 
-    if (os.argv.len == 1) {
+    if (args.len == 1) {
         var stdin = std.io.getStdIn().reader();
         const input = try stdin.readAllAlloc(allocator, std.math.maxInt(u32));
         var src = std.io.StreamSource{ .buffer = std.io.fixedBufferStream(input) };
         parser = try ondemand.Parser.init(&src, allocator, "<stdin>", .{});
-    } else if (os.argv.len == 2) {
-        const filepath = std.mem.span(os.argv[1]);
+    } else if (args.len == 2) {
+        const filepath = std.mem.span(args[1]);
         const file = try std.fs.cwd().openFile(filepath, .{ .mode = .read_only});
 
         var src = std.io.StreamSource{ .file = file };
