@@ -28,4 +28,5 @@ jobs:
     - run: zig build
     - run: zig build -Dondemand
     - run: zig build -Dstep-128 
-    - run: zig build -Dondemand -Dstep-128 
+    - run: zig build -Dondemand -Dstep-128
+  
