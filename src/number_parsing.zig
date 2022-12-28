@@ -1,7 +1,6 @@
 const std = @import("std");
 const mem = std.mem;
 usingnamespace @import("vector_types.zig");
-usingnamespace @import("llvm_intrinsics.zig");
 const main = @import("main.zig");
 const CharUtils = @import("string_parsing.zig").CharUtils;
 const dom = @import("dom.zig");
@@ -301,7 +300,8 @@ fn parse_decimal2(p_: [*]const u8) Decimal {
             answer.num_digits += 1;
             p += 1;
         }
-        answer.decimal_point = @intCast(i32, @ptrToInt(first_after_period) -% @ptrToInt(p));
+
+        answer.decimal_point = @truncate(i32, @bitCast(isize, @ptrToInt(first_after_period) -% @ptrToInt(p)));
     }
     if (answer.num_digits > 0) {
         var preverse = p - 1;

@@ -1,7 +1,6 @@
 const std = @import("std");
 const mem = std.mem;
 const v = @import("vector_types.zig");
-const _mm256_storeu_si256 = @import("llvm_intrinsics.zig")._mm256_storeu_si256;
 const common = @import("common.zig");
 
 const escape_map = [256]u8{

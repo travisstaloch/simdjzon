@@ -4,7 +4,6 @@ const common = @import("common.zig");
 const Ondemand = @import("ondemand.zig");
 const println = common.println;
 const print = common.print;
-const llvm = @import("llvm_intrinsics.zig");
 
 depth: u8 = 0,
 

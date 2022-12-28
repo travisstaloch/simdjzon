@@ -10,7 +10,11 @@ const cmn = @import("common.zig");
 
 const allr = testing.allocator;
 test "tape build" {
-    const input = @embedFile("../test/test.json");
+    std.debug.print("\n", .{});
+    const f = try std.fs.cwd().openFile("test/test.json", .{});
+    defer f.close();
+    const input = try f.readToEndAlloc(allr, std.math.maxInt(u32));
+    defer allr.free(input);
     const expecteds = [_]u64{
         TapeType.ROOT.encode_value(37), //  pointing  to 37 (rightafter  last  node) :0
         TapeType.START_OBJECT.encode_value(37 | (8 << 32)), // pointing to 37, length 8  :1
@@ -91,6 +95,15 @@ test "tape build" {
             try testing.expectEqual(expecteds[i], parser.doc.tape.items[i]);
         }
     }
+}
+
+test "tape build 2" {
+    const input =
+        \\{ "\\\"Nam[{": [ 116,"\\\\" , 234, "true", false ], "t":"\\\""}                                         
+    ;
+    var parser = try dom.Parser.initFixedBuffer(allr, input, .{});
+    defer parser.deinit();
+    try parser.parse();
 }
 
 test "float" {
@@ -358,6 +371,7 @@ test "ondemand struct iteration types" {
             var obj = try doc.get_object();
             var objit = obj.iterator();
             var buf: [10]u8 = undefined;
+
             {
                 var f = (try objit.next(&buf)) orelse return testing.expect(false);
                 try testing.expectEqualStrings("str", buf[0..3]);

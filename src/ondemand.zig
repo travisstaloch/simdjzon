@@ -398,7 +398,7 @@ pub const Iterator = struct {
 
     pub fn advance(iter: *Iterator, peek_len: u16) ![*]const u8 {
         defer iter.token.index += 1;
-        // print("advance '{s}'\n", .{(try iter.token.peek(iter.token.index, len))[0..len]});
+        // cmn.print("advance '{s}'\n", .{(try iter.parser.peek(iter.token.index, peek_len))[0..peek_len]});
         return iter.parser.peek(iter.token.index, peek_len);
     }
     pub fn peek(iter: *Iterator, index: [*]const u32, len: u16) ![*]const u8 {
@@ -428,7 +428,7 @@ pub const Iterator = struct {
     }
     pub fn skip_child(iter: *Iterator, parent_depth: u32) !void {
         if (iter.depth <= parent_depth) return;
-
+        
         switch ((try iter.advance(1))[0]) {
             // TODO consider whether matching braces is a requirement: if non-matching braces indicates
             // *missing* braces, then future lookups are not in the object/arrays they think they are,
@@ -1355,8 +1355,9 @@ pub const Parser = struct {
     ) ![*]const u8 {
         // cmn.println("peek() len_hint {} READ_BUF_CAP {}", .{ len_hint, READ_BUF_CAP });
         if (len_hint > READ_BUF_CAP) return error.CAPACITY;
+        // cmn.println("\nTokenIterator: {} <= start {} end {} < read_buf_start_pos + len {}", .{ parser.read_buf_start_pos, start, end, read_buf_start_pos + read_buf_len });
+        cmn.println("parser {*} position {*} len_hint {}", .{parser, position, len_hint});
         const start_pos = position[0];
-        // cmn.println("\nTokenIterator: {} <= start {} end {} < read_buf_start_pos + len {}", .{ read_buf_start_pos, start, end, read_buf_start_pos + read_buf_len });
         if (parser.read_buf_start_pos <= start_pos and start_pos < parser.read_buf_start_pos + parser.read_buf_len) blk: {
             const offset = start_pos - parser.read_buf_start_pos;
             if (offset + len_hint > READ_BUF_CAP) break :blk;
