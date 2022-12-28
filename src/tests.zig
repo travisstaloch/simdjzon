@@ -319,7 +319,7 @@ test "ondemand at_pointer" {
 // ------------
 
 const E = cmn.Error || error{ TestExpectedEqual, TestUnexpectedResult, TestExpectedApproxEqAbs, TestUnexpectedError, TestExpectedError };
-fn test_ondemand_doc(input: []const u8, expected: fn (doc: *ondemand.Document) E!void) !void {
+fn test_ondemand_doc(input: []const u8, expected: *const fn (doc: *ondemand.Document) E!void) !void {
     // std.debug.print("\n0123456789012345678901234567890123456789\n{s}\n", .{input});
     var src = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(input) };
     var parser = try ondemand.Parser.init(&src, allr, "<fba>", .{});
@@ -333,9 +333,13 @@ test "ondemand struct find_field" {
         \\ {"x": 1, "y": 2, "z": {"a": 33}}
     , struct {
         fn func(doc: *ondemand.Document) E!void {
-            try testing.expectEqual(@as(u64, 2), try (try doc.find_field("y")).get_int(u64));
-            try testing.expectEqual(@as(u64, 1), try (try doc.find_field("x")).get_int(u64));
-            try testing.expectEqual(@as(u8, 33), try (try (try doc.find_field("z")).find_field("a")).get_int(u8));
+            var y = try doc.find_field("y");
+            try testing.expectEqual(@as(u64, 2), try y.get_int(u64));
+            var x = try doc.find_field("x");
+            try testing.expectEqual(@as(u64, 1), try x.get_int(u64));
+            var z = try doc.find_field("z");
+            var a = try z.find_field("a");
+            try testing.expectEqual(@as(u8, 33), try a.get_int(u8));
         }
     }.func);
 }
@@ -514,8 +518,10 @@ test "ondemand atpointer" {
         \\{"a": {"b": 1, "c": [1,2]}}
     , struct {
         fn func(doc: *ondemand.Document) E!void {
-            try testing.expectEqual(@as(u8, 1), try (try doc.at_pointer("/a/b")).get_int(u8));
-            try testing.expectEqual(@as(u8, 2), try (try doc.at_pointer("/a/c/1")).get_int(u8));
+            var b = try doc.at_pointer("/a/b");
+            try testing.expectEqual(@as(u8, 1), try b.get_int(u8));
+            var c1 = try doc.at_pointer("/a/c/1");
+            try testing.expectEqual(@as(u8, 2), try c1.get_int(u8));
             try testing.expectError(error.NO_SUCH_FIELD, doc.at_pointer("/b"));
         }
     }.func);
@@ -527,11 +533,15 @@ test "ondemand at, array at_pointer" {
     , struct {
         fn func(doc: *ondemand.Document) E!void {
             var arr = try doc.get_array();
-            try testing.expectEqual(@as(u8, 1), try (try arr.at(0)).?.get_int(u8));
-            try testing.expectEqual(@as(u8, 2), try (try arr.at(1)).?.get_int(u8));
+            var e0 = try arr.at(0);
+            try testing.expectEqual(@as(u8, 1), try e0.?.get_int(u8));
+            var e1 = try arr.at(1);
+            try testing.expectEqual(@as(u8, 2), try e1.?.get_int(u8));
             try testing.expectEqual(@as(?ondemand.Value, null), try arr.at(2));
-            try testing.expectEqual(@as(u8, 1), try (try arr.at_pointer("/0")).get_int(u8));
-            try testing.expectEqual(@as(u8, 2), try (try arr.at_pointer("/1")).get_int(u8));
+            var a0 = try arr.at_pointer("/0");
+            try testing.expectEqual(@as(u8, 1), try a0.get_int(u8));
+            var a1 = try arr.at_pointer("/1");
+            try testing.expectEqual(@as(u8, 2), try a1.get_int(u8));
             try testing.expectError(error.INVALID_JSON_POINTER, arr.at_pointer("/2"));
         }
     }.func);
@@ -612,7 +622,8 @@ test "ondemand array iteration nested" {
         fn func(doc: *ondemand.Document) E!void {
             var buf: [0x10]u8 = undefined;
             const obj1 = try doc.get_object();
-            var field1 = (try obj1.iterator().next(&buf)) orelse return testing.expect(false);
+            var it1 = obj1.iterator();
+            var field1 = try it1.next(&buf) orelse return testing.expect(false);
             var arr1 = try field1.value.get_array();
             var it = arr1.iterator();
             var i: u8 = 0;
@@ -695,7 +706,8 @@ test "twitter" {
         var parser = try ondemand.Parser.init(&src, allr, output_filename, .{});
         defer parser.deinit();
         var tweets = try parser.iterate();
-        const count = try (try tweets.at_pointer("/search_metadata/count")).get_int(u8);
+        var x = try tweets.at_pointer("/search_metadata/count");
+        const count = try x.get_int(u8);
 
         try testing.expectEqual(@as(u8, 100), count);
     }

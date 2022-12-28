@@ -27,7 +27,8 @@ const GetOptions = struct {
 pub const Value = struct {
     iter: ValueIterator,
     pub fn find_field(v: *Value, key: []const u8) !Value {
-        return (try v.start_or_resume_object()).find_field(key);
+        var x = try v.start_or_resume_object();
+        return x.find_field(key);
     }
     pub fn find_field_unordered(v: *Value, key: []const u8) !Value {
         return (try v.start_or_resume_object()).find_field_unordered(key);
@@ -65,8 +66,14 @@ pub const Value = struct {
 
     pub fn at_pointer(v: *Value, json_pointer: []const u8) !Value {
         return switch (try v.iter.get_type()) {
-            .array => (try v.get_array()).at_pointer(json_pointer),
-            .object => (try v.get_object()).at_pointer(json_pointer),
+            .array => blk: {
+                var x = try v.get_array();
+                break :blk x.at_pointer(json_pointer);
+            },
+            .object => blk: {
+                var x = try v.get_object();
+                break :blk x.at_pointer(json_pointer);
+            },
             else => error.INVALID_JSON_POINTER,
         };
     }
@@ -107,10 +114,11 @@ pub const Value = struct {
                                                 var list = std.ArrayListUnmanaged(std.meta.Child(C)){};
                                                 var arr = try val.get_array();
                                                 var iter = arr.iterator();
-                                                while (try iter.next()) |*arr_ele| {
+                                                while (try iter.next()) |arr_ele_| {
+                                                    var arr_ele = arr_ele_;
                                                     try arr_ele.get(try list.addOne(allocator), options);
                                                 }
-                                                out.* = list.toOwnedSlice(allocator);
+                                                out.* = try list.toOwnedSlice(allocator);
                                             },
                                             .string => out.* = try val.get_string_alloc(C, allocator),
                                             else => return error.INCORRECT_TYPE,
@@ -127,8 +135,9 @@ pub const Value = struct {
                                     .object => {
                                         var obj = try val.get_object();
                                         inline for (std.meta.fields(C)) |field| {
-                                            const field_info = @typeInfo(field.field_type);
-                                            if (obj.find_field_unordered(field.name)) |*obj_val|
+                                            const field_info = @typeInfo(field.type);
+                                            if (obj.find_field_unordered(field.name)) |obj_val_|{
+                                                var obj_val = obj_val_;
                                                 if (field_info != .Pointer)
                                                     try obj_val.get(&@field(out, field.name), options)
                                                 else {
@@ -137,6 +146,7 @@ pub const Value = struct {
                                                     else
                                                         try obj_val.get(@field(out, field.name), options);
                                                 }
+                                            }
                                             else |_| {}
                                         }
                                     },
@@ -245,7 +255,7 @@ pub const Object = struct {
             error.NO_SUCH_FIELD;
     }
 
-    pub fn at_pointer(o: *Object, json_pointer_: []const u8) !Value {
+    pub fn at_pointer(o: *Object, json_pointer_: []const u8) cmn.Error!Value {
         if (json_pointer_[0] != '/') return error.INVALID_JSON_POINTER;
         var json_pointer = json_pointer_[1..];
         const slash = mem.indexOfScalar(u8, json_pointer, '/');
@@ -330,7 +340,7 @@ const Array = struct {
                 return e;
         return null;
     }
-    pub fn at_pointer(a: *Array, json_pointer_: []const u8) !Value {
+    pub fn at_pointer(a: *Array, json_pointer_: []const u8) cmn.Error!Value {
         if (json_pointer_[0] != '/') return error.INVALID_JSON_POINTER;
         var json_pointer = json_pointer_[1..];
         // - means "the append position" or "the element after the end of the array"
@@ -1224,47 +1234,62 @@ pub const Document = struct {
         return Value{ .iter = doc.resume_value_iterator() };
     }
     pub fn find_field(doc: *Document, key: []const u8) !Value {
-        return doc.resume_value().find_field(key);
+        var val = doc.resume_value();
+        return val.find_field(key);
     }
     pub fn find_field_unordered(doc: *Document, key: []const u8) !Value {
         return doc.resume_value().find_field_unordered(key);
     }
     pub fn get_int(doc: *Document, comptime T: type) !T {
-        return doc.get_root_value_iterator().get_root_int(T);
+        var it = doc.get_root_value_iterator();
+        return it.get_root_int(T);
     }
     pub fn get_string(doc: *Document, comptime T: type, buf: []u8) !T {
-        return doc.get_root_value_iterator().get_root_string(T, buf);
+        var it = doc.get_root_value_iterator();
+        return it.get_root_string(T, buf);
     }
     pub fn get_string_alloc(doc: *Document, comptime T: type, allocator: mem.Allocator) !T {
-        return doc.get_root_value_iterator().get_root_string_alloc(T, allocator);
+        var it = doc.get_root_value_iterator();
+        return it.get_root_string_alloc(T, allocator);
     }
     pub fn get_double(doc: *Document) !f64 {
-        return doc.get_root_value_iterator().get_root_double();
+        var it = doc.get_root_value_iterator();
+        return it.get_root_double();
     }
     pub fn get_bool(doc: *Document) !bool {
-        return doc.get_root_value_iterator().get_root_bool();
+        var it = doc.get_root_value_iterator();
+        return it.get_root_bool();
     }
     pub fn is_null(doc: *Document) !bool {
-        return doc.get_root_value_iterator().is_root_null();
+        var it = doc.get_root_value_iterator();
+        return it.is_root_null();
     }
     pub fn rewind(doc: *Document) !void {
         return doc.iter.rewind();
     }
     pub fn get_type(doc: *Document) !ValueType {
-        return doc.get_root_value_iterator().get_type();
+        var x = doc.get_root_value_iterator();
+        return x.get_type();
     }
     pub fn at_pointer(doc: *Document, json_pointer: []const u8) !Value {
         try doc.rewind(); // Rewind the document each time at_pointer is called
         if (json_pointer.len == 0)
             return doc.resume_value();
         return switch (try doc.get_type()) {
-            .array => (try doc.get_array()).at_pointer(json_pointer),
-            .object => (try doc.get_object()).at_pointer(json_pointer),
+            .array => blk: {
+                var x = try doc.get_array();
+                break :blk x.at_pointer(json_pointer);
+            },
+            .object => blk: {
+                var x = try doc.get_object();
+                break :blk x.at_pointer(json_pointer);
+            },
             else => error.INVALID_JSON_POINTER,
         };
     }
     pub fn get(doc: *Document, out: anytype, options: GetOptions) !void {
-        return doc.value().get(out, options);
+        var x = doc.value();
+        return x.get(out, options);
     }
     pub fn value(doc: *Document) Value {
         return Value{ .iter = doc.get_root_value_iterator() };

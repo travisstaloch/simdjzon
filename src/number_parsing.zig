@@ -1,6 +1,5 @@
 const std = @import("std");
 const mem = std.mem;
-usingnamespace @import("vector_types.zig");
 const main = @import("main.zig");
 const CharUtils = @import("string_parsing.zig").CharUtils;
 const dom = @import("dom.zig");

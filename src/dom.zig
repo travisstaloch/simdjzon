@@ -60,7 +60,7 @@ const BitIndexer = struct {
     // base_ptr[base] incrementing base as we go
     // will potentially store extra values beyond end of valid bits, so base_ptr
     // needs to be large enough to handle this
-    inline fn write(indexer: *BitIndexer, reader_pos_: u64, bits_: u64) void {
+    fn write(indexer: *BitIndexer, reader_pos_: u64, bits_: u64) void {
         var bits = bits_;
         // In some instances, the next branch is expensive because it is mispredicted.
         // Unfortunately, in other cases,
@@ -145,7 +145,7 @@ const Utf8Checker = struct {
         };
     }
     // zig fmt: off
-    inline fn check_special_cases(input: v.u8x32, prev1: v.u8x32) v.u8x32 {
+    fn check_special_cases(input: v.u8x32, prev1: v.u8x32) v.u8x32 {
         // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
         // Bit 1 = Too Long (ASCII followed by continuation)
         // Bit 2 = Overlong 3-byte
@@ -270,7 +270,7 @@ const Utf8Checker = struct {
     //
     // Check whether the current bytes are valid UTF-8.
     //
-    inline fn check_utf8_bytes(checker: *Utf8Checker, input: v.u8x32, prev_input: v.u8x32) void {
+    fn check_utf8_bytes(checker: *Utf8Checker, input: v.u8x32, prev_input: v.u8x32) void {
         // Flip prev1...prev3 so we can easily determine if they are 2+, 3+ or 4+ lead bytes
         // (2, 3, 4-byte leads become large positive numbers instead of small negative numbers)
         const prev1 = prev(1, input, prev_input);
@@ -281,13 +281,13 @@ const Utf8Checker = struct {
     // The only problem that can happen at EOF is that a multibyte character is too short
     // or a byte value too large in the last bytes: check_special_cases only checks for bytes
     // too large in the first of two bytes.
-    inline fn check_eof(checker: *Utf8Checker) void {
+    fn check_eof(checker: *Utf8Checker) void {
         // If the previous block had incomplete UTF-8 characters at the end, an ASCII block can't
         // possibly finish them.
         checker.err |= checker.prev_incomplete;
     }
 
-    inline fn is_ascii(input: v.u8x64) bool {
+    fn is_ascii(input: v.u8x64) bool {
         const bytes: [64]u8 = input;
         const a: v.u8x32 = bytes[0..32].*;
         const b: v.u8x32 = bytes[32..64].*;
@@ -297,7 +297,7 @@ const Utf8Checker = struct {
         return @bitCast(u32, @bitCast(v.u1x32, x != @splat(32, @as(u8, 0)))) == 0;
     }
 
-    inline fn check_next_input(checker: *Utf8Checker, input: v.u8x64) void {
+    fn check_next_input(checker: *Utf8Checker, input: v.u8x64) void {
         // const NUM_CHUNKS = cmn.STEP_SIZE / 32;
         const NUM_CHUNKS = 2;
         const chunks = @bitCast([NUM_CHUNKS][32]u8, input);
@@ -324,7 +324,7 @@ const Utf8Checker = struct {
         }
     }
     // do not forget to call check_eof!
-    inline fn errors(checker: Utf8Checker) cmn.JsonError!void {
+    fn errors(checker: Utf8Checker) cmn.JsonError!void {
         const err = @reduce(.Or, checker.err);
         if (err != 0) return error.UTF8_ERROR;
     }
@@ -333,7 +333,7 @@ const Utf8Checker = struct {
     // Return nonzero if there are incomplete multibyte characters at the end of the block:
     // e.g. if there is a 4-byte character, but it's 3 bytes from the end.
     //
-    inline fn is_incomplete(input: v.u8x32) v.u8x32 {
+    fn is_incomplete(input: v.u8x32) v.u8x32 {
         // If the previous input's last 3 bytes match this, they're too short (they ended at EOF):
         // ... 1111____ 111_____ 11______
         const max_array: [32]u8 = .{
@@ -353,11 +353,11 @@ const StringBlock = struct {
     quote: u64,
     in_string: u64,
 
-    inline fn string_tail(sb: StringBlock) u64 {
+    fn string_tail(sb: StringBlock) u64 {
         return sb.in_string ^ sb.quote;
     }
 
-    inline fn non_quote_inside_string(sb: StringBlock, mask: u64) u64 {
+    fn non_quote_inside_string(sb: StringBlock, mask: u64) u64 {
         return mask & sb.in_string;
     }
 };
@@ -429,7 +429,7 @@ const CharacterBlock = struct {
         return .{ .whitespace = @bitCast(u64, whitespace), .op = @bitCast(u64, op) };
     }
 
-    pub inline fn scalar(cb: CharacterBlock) u64 {
+    pub fn scalar(cb: CharacterBlock) u64 {
         return ~(cb.op | cb.whitespace);
     }
 };
@@ -439,20 +439,20 @@ const Block = struct {
     characters: CharacterBlock,
     follows_nonquote_scalar: u64,
 
-    inline fn structural_start(block: Block) u64 {
+    fn structural_start(block: Block) u64 {
         return block.potential_structural_start() & ~block.string.string_tail();
     }
-    inline fn potential_structural_start(block: Block) u64 {
+    fn potential_structural_start(block: Block) u64 {
         return block.characters.op | block.potential_scalar_start();
     }
-    inline fn potential_scalar_start(block: Block) u64 {
+    fn potential_scalar_start(block: Block) u64 {
         // The term "scalar" refers to anything except structural characters and white space
         // (so letters, numbers, quotes).
         // Whenever it is preceded by something that is not a structural element ({,},[,],:, ") nor a white-space
         // then we know that it is irrelevant structurally.
         return block.characters.scalar() & ~block.follows_nonquote_scalar;
     }
-    inline fn non_quote_inside_string(block: Block, mask: u64) u64 {
+    fn non_quote_inside_string(block: Block, mask: u64) u64 {
         return block.string.non_quote_inside_string(mask);
     }
 };
@@ -470,7 +470,7 @@ pub const StructuralIndexer = struct {
         };
     }
 
-    inline fn follows(match: u64, overflow: *u64) u64 {
+    fn follows(match: u64, overflow: *u64) u64 {
         const result = match << 1 | overflow.*;
         overflow.* = match >> 63;
         return result;
@@ -639,26 +639,26 @@ pub const Iterator = struct {
         };
     }
 
-    inline fn advance(iter: *Iterator) [*]const u8 {
+    fn advance(iter: *Iterator) [*]const u8 {
         defer iter._next_structural += 1;
         // std.log.debug("advance() next_structural idx {} peek() '{c}'", .{ (@ptrToInt(iter.next_structural) - @ptrToInt(iter.parser.indexer.bit_indexer.tail.items.ptr)) / 4, iter.peek() });
         return iter.peek();
     }
 
-    inline fn peek(iter: *Iterator) [*]const u8 {
+    fn peek(iter: *Iterator) [*]const u8 {
         return iter.parser.bytes.ptr + iter._next_structural[0];
     }
 
-    pub inline fn at_beginning(iter: *Iterator) bool {
+    pub fn at_beginning(iter: *Iterator) bool {
         // std.log.debug("at-beginning {*}: {}", .{ iter.next_structural, iter.next_structural[0] });
         return iter.next_structural() == iter.parser.indexer.bit_indexer.tail.items.ptr;
     }
 
-    pub inline fn next_structural(iter: Iterator) [*]u32 {
+    pub fn next_structural(iter: Iterator) [*]u32 {
         return iter._next_structural;
     }
 
-    inline fn at_eof(iter: *Iterator) bool {
+    fn at_eof(iter: *Iterator) bool {
         // std.log.debug("at-beginning {*}: {}", .{ iter.next_structural, iter.next_structural[0] });
         return @ptrToInt(iter._next_structural) == @ptrToInt(iter.parser.indexer.bit_indexer.tail.items.ptr + iter.parser.n_structural_indexes);
     }
@@ -718,7 +718,7 @@ pub const Iterator = struct {
         }
     }
 
-    inline fn object_begin(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!State {
+    fn object_begin(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!State {
         iter.log.start_value(iter, "object");
         iter.depth += 1;
         // iter.log.line_fmt(iter, "", "depth", "{d}/{d}", .{ iter.depth, iter.parser.max_depth });
@@ -740,7 +740,7 @@ pub const Iterator = struct {
         return .object_field;
     }
 
-    inline fn object_field(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!State {
+    fn object_field(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!State {
         if (iter.advance()[0] != ':') {
             iter.log.err(iter, "Missing colon after key in object");
             return error.TAPE_ERROR;
@@ -763,7 +763,7 @@ pub const Iterator = struct {
         return .object_continue;
     }
 
-    inline fn object_continue(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!State {
+    fn object_continue(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!State {
         const value = iter.advance();
         // std.log.debug("object_continue() value '{c}'", .{value});
         switch (value[0]) {
@@ -791,7 +791,7 @@ pub const Iterator = struct {
         unreachable;
     }
 
-    inline fn scope_end(iter: *Iterator, _: *TapeBuilder) cmn.Error!State {
+    fn scope_end(iter: *Iterator, _: *TapeBuilder) cmn.Error!State {
         // std.log.debug("scope_end iter.depth {}", .{iter.depth});
         iter.depth -= 1;
         if (iter.depth == 0) return .document_end;
@@ -802,7 +802,7 @@ pub const Iterator = struct {
         return .object_continue;
     }
 
-    inline fn array_begin(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!State {
+    fn array_begin(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!State {
         iter.log.start_value(iter, "array");
         iter.depth += 1;
         if (iter.depth >= iter.parser.max_depth) {
@@ -814,7 +814,7 @@ pub const Iterator = struct {
         return .array_value;
     }
 
-    inline fn array_value(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!State {
+    fn array_value(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!State {
         const value = iter.advance();
         switch (value[0]) {
             '{' => {
@@ -836,7 +836,7 @@ pub const Iterator = struct {
         return .array_continue;
     }
 
-    inline fn array_continue(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!State {
+    fn array_continue(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!State {
         switch (iter.advance()[0]) {
             ',' => {
                 iter.increment_count();
@@ -855,7 +855,7 @@ pub const Iterator = struct {
         unreachable;
     }
 
-    inline fn document_end(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!void {
+    fn document_end(iter: *Iterator, visitor: *TapeBuilder) cmn.Error!void {
         iter.log.end_value(iter, "document");
         try visitor.visit_document_end();
         iter.parser.next_structural_index = try cmn.ptr_diff(
@@ -873,11 +873,11 @@ pub const Iterator = struct {
         }
     }
 
-    inline fn current_container(iter: *Iterator) *OpenContainer {
+    fn current_container(iter: *Iterator) *OpenContainer {
         // std.log.debug("current_container iter.parser.open_containers.len {} iter.depth {}", .{ iter.parser.open_containers.items.len, iter.depth });
         return &iter.parser.open_containers.items(.open_container)[iter.depth];
     }
-    inline fn increment_count(iter: *Iterator) void {
+    fn increment_count(iter: *Iterator) void {
         // we have a key value pair in the object at parser.dom_parser.depth - 1
         iter.current_container().count += 1;
     }
@@ -901,17 +901,17 @@ pub const TapeType = enum(u8) {
     FALSE = 'f',
     NULL = 'n',
     INVALID = 'i',
-    pub inline fn as_u64(tt: TapeType) u64 {
+    pub fn as_u64(tt: TapeType) u64 {
         return @as(u64, @enumToInt(tt)) << 56;
     }
-    pub inline fn from_u64(x: u64) TapeType {
+    pub fn from_u64(x: u64) TapeType {
         return std.meta.intToEnum(TapeType, (x & 0xff00000000000000) >> 56) catch .INVALID;
     }
-    pub inline fn encode_value(tt: TapeType, value: u64) u64 {
+    pub fn encode_value(tt: TapeType, value: u64) u64 {
         assert(value <= std.math.maxInt(u56));
         return @as(u64, @enumToInt(tt)) << 56 | value;
     }
-    pub inline fn extract_value(item: u64) u64 {
+    pub fn extract_value(item: u64) u64 {
         return item & value_mask;
     }
     pub const value_mask = 0x00ffffffffffffff;
@@ -929,50 +929,50 @@ pub const TapeBuilder = struct {
         };
     }
 
-    pub inline fn append(tb: *TapeBuilder, val: u64, tt: TapeType) void {
+    pub fn append(tb: *TapeBuilder, val: u64, tt: TapeType) void {
         // iter.log.line_fmt(iter, "", "append", "val {} tt {}", .{ val, tt });
         tb.tape.appendAssumeCapacity(val | tt.as_u64());
     }
 
-    pub inline fn append2(tb: *TapeBuilder, val: u64, val2: anytype, tt: TapeType) void {
+    pub fn append2(tb: *TapeBuilder, val: u64, val2: anytype, tt: TapeType) void {
         tb.append(val, tt);
         assert(@sizeOf(@TypeOf(val2)) == 8);
         tb.tape.appendAssumeCapacity(val2);
     }
 
-    pub inline fn append_double(tb: *TapeBuilder, val: f64) void {
+    pub fn append_double(tb: *TapeBuilder, val: f64) void {
         tb.append2(0, @bitCast(u64, val), .DOUBLE);
     }
 
-    pub inline fn append_i64(tb: *TapeBuilder, val: u64) void {
+    pub fn append_i64(tb: *TapeBuilder, val: u64) void {
         tb.append2(0, val, .INT64);
     }
 
-    pub inline fn append_u64(tb: *TapeBuilder, val: u64) void {
+    pub fn append_u64(tb: *TapeBuilder, val: u64) void {
         tb.append2(0, val, .UINT64);
     }
 
-    pub inline fn write(tb: *TapeBuilder, idx: usize, val: u64, tt: TapeType) void {
+    pub fn write(tb: *TapeBuilder, idx: usize, val: u64, tt: TapeType) void {
         // iter.log.line_fmt(iter, "", "write", "val {} tt {} idx {}", .{ val, tt, idx });
         assert(idx < tb.tape.items.len);
         tb.tape.items[idx] = val | tt.as_u64();
     }
 
-    pub inline fn next_tape_index(tb: TapeBuilder) u32 {
+    pub fn next_tape_index(tb: TapeBuilder) u32 {
         return @intCast(u32, tb.tape.items.len);
     }
 
-    pub inline fn skip(tb: *TapeBuilder) void {
+    pub fn skip(tb: *TapeBuilder) void {
         _ = tb.tape.addOneAssumeCapacity();
     }
 
-    pub inline fn empty_container(tb: *TapeBuilder, start: TapeType, end: TapeType) void {
+    pub fn empty_container(tb: *TapeBuilder, start: TapeType, end: TapeType) void {
         const start_index = tb.next_tape_index();
         tb.append(start_index + 2, start);
         tb.append(start_index, end);
     }
 
-    pub inline fn start_container(
+    pub fn start_container(
         tb: *TapeBuilder,
         open_containers: *std.MultiArrayList(OpenContainerInfo),
         is_array: bool,
@@ -989,7 +989,7 @@ pub const TapeBuilder = struct {
         tb.skip();
     }
 
-    pub inline fn end_container(tb: *TapeBuilder, iter: *Iterator, start: TapeType, end: TapeType) void {
+    pub fn end_container(tb: *TapeBuilder, iter: *Iterator, start: TapeType, end: TapeType) void {
         // Write the ending tape element, pointing at the start location
         const container = iter.parser.open_containers.items(.open_container)[iter.depth];
         defer iter.parser.open_containers.shrinkRetainingCapacity(iter.depth);
@@ -1004,12 +1004,12 @@ pub const TapeBuilder = struct {
         tb.write(start_tape_index, tb.next_tape_index() | (@as(u64, cntsat) << 32), start);
     }
 
-    inline fn on_start_string(tb: *TapeBuilder, iter: *Iterator) ![*]u8 {
+    fn on_start_string(tb: *TapeBuilder, iter: *Iterator) ![*]u8 {
         // iter.log.line_fmt(iter, "", "start_string", "iter.parser.doc.string_buf.len {}", .{iter.parser.doc.string_buf.len});
         tb.append(cmn.ptr_diff(u64, tb.current_string_buf_loc, iter.parser.doc.string_buf.ptr) catch unreachable, .STRING);
         return tb.current_string_buf_loc + @sizeOf(u32);
     }
-    inline fn on_end_string(tb: *TapeBuilder, iter: *Iterator, dst: [*]u8) !void {
+    fn on_end_string(tb: *TapeBuilder, iter: *Iterator, dst: [*]u8) !void {
         const str_len = try cmn.ptr_diff(u32, dst, tb.current_string_buf_loc + @sizeOf(u32));
         // cmn.println("str_len {} str '{s}'", .{ str_len, (tb.current_string_buf_loc + 4)[0..str_len] });
 
@@ -1029,7 +1029,7 @@ pub const TapeBuilder = struct {
         tb.current_string_buf_loc += str_len + 1 + @sizeOf(u32);
     }
 
-    inline fn visit_root_primitive(visitor: *TapeBuilder, iter: *Iterator, value: [*]const u8) !void {
+    fn visit_root_primitive(visitor: *TapeBuilder, iter: *Iterator, value: [*]const u8) !void {
         return switch (value[0]) {
             '"' => visitor.visit_string(iter, value, false),
             't' => visitor.visit_true_atom(iter, value),
@@ -1043,30 +1043,30 @@ pub const TapeBuilder = struct {
         };
     }
 
-    inline fn visit_number(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) cmn.Error!void {
+    fn visit_number(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) cmn.Error!void {
         iter.log.value(iter, "number");
         try number_parsing.parse_number(value, tb);
     }
-    inline fn visit_true_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) cmn.Error!void {
+    fn visit_true_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) cmn.Error!void {
         iter.log.value(iter, "true");
         assert(value[0] == 't');
         if (!atom_parsing.is_valid_rue_atom(value + 1)) return error.T_ATOM_ERROR;
         tb.append(0, TapeType.TRUE);
     }
-    inline fn visit_false_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) cmn.Error!void {
+    fn visit_false_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) cmn.Error!void {
         iter.log.value(iter, "false");
         assert(value[0] == 'f');
         if (!atom_parsing.is_valid_alse_atom(value + 1)) return error.T_ATOM_ERROR;
         tb.append(0, TapeType.FALSE);
     }
-    inline fn visit_null_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) cmn.Error!void {
+    fn visit_null_atom(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) cmn.Error!void {
         iter.log.value(iter, "null");
         assert(value[0] == 'n');
         if (!atom_parsing.is_valid_ull_atom(value + 1)) return error.T_ATOM_ERROR;
         tb.append(0, TapeType.NULL);
     }
 
-    inline fn visit_primitive(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) !void {
+    fn visit_primitive(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) !void {
         return switch (value[0]) {
             '"' => tb.visit_string(iter, value, false),
             't' => tb.visit_true_atom(iter, value),
@@ -1080,7 +1080,7 @@ pub const TapeBuilder = struct {
         };
     }
 
-    inline fn visit_string(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8, key: bool) cmn.Error!void {
+    fn visit_string(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8, key: bool) cmn.Error!void {
         iter.log.value(iter, if (key) "key" else "string");
         var dst = try tb.on_start_string(iter);
         dst = string_parsing.parse_string(value + 1, dst) orelse {
@@ -1091,36 +1091,36 @@ pub const TapeBuilder = struct {
         try tb.on_end_string(iter, dst);
     }
 
-    pub inline fn visit_key(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) !void {
+    pub fn visit_key(tb: *TapeBuilder, iter: *Iterator, value: [*]const u8) !void {
         return tb.visit_string(iter, value, true);
     }
 
-    pub inline fn visit_empty_object(tb: *TapeBuilder) cmn.Error!void {
+    pub fn visit_empty_object(tb: *TapeBuilder) cmn.Error!void {
         return tb.empty_container(.START_OBJECT, .END_OBJECT);
     }
 
-    pub inline fn visit_empty_array(tb: *TapeBuilder) cmn.Error!void {
+    pub fn visit_empty_array(tb: *TapeBuilder) cmn.Error!void {
         return tb.empty_container(.START_ARRAY, .END_ARRAY);
     }
 
-    pub inline fn visit_array_start(tb: *TapeBuilder, iter: *Iterator) !void {
+    pub fn visit_array_start(tb: *TapeBuilder, iter: *Iterator) !void {
         return tb.start_container(&iter.parser.open_containers, true, 0);
     }
 
-    pub inline fn visit_array_end(tb: *TapeBuilder, iter: *Iterator) !void {
+    pub fn visit_array_end(tb: *TapeBuilder, iter: *Iterator) !void {
         return tb.end_container(iter, .START_ARRAY, .END_ARRAY);
     }
 
-    pub inline fn visit_object_start(tb: *TapeBuilder, iter: *Iterator) !void {
+    pub fn visit_object_start(tb: *TapeBuilder, iter: *Iterator) !void {
         return tb.start_container(&iter.parser.open_containers, false, 0);
     }
-    pub inline fn visit_object_end(tb: *TapeBuilder, iter: *Iterator) !void {
+    pub fn visit_object_end(tb: *TapeBuilder, iter: *Iterator) !void {
         return tb.end_container(iter, .START_OBJECT, .END_OBJECT);
     }
-    pub inline fn visit_document_start(tb: *TapeBuilder, iter: *Iterator) !void {
+    pub fn visit_document_start(tb: *TapeBuilder, iter: *Iterator) !void {
         return tb.start_container(&iter.parser.open_containers, false, 0);
     }
-    pub inline fn visit_document_end(tb: *TapeBuilder) !void {
+    pub fn visit_document_end(tb: *TapeBuilder) !void {
         tb.write(0, tb.next_tape_index(), .ROOT);
         // iter.log.line_fmt(iter, "?", "document_end", "open_containers.len {} tape.len {}", .{ iter.parser.open_containers.items.len, tb.tape.items.len });
         return tb.append(0, .ROOT);
@@ -1217,7 +1217,7 @@ pub const Parser = struct {
         parser.allocator.free(parser.bytes);
     }
 
-    inline fn find_escaped(parser: *Parser, backslash_: u64) u64 {
+    fn find_escaped(parser: *Parser, backslash_: u64) u64 {
         // If there was overflow, pretend the first character isn't a backslash
         var backslash = backslash_ & ~parser.prev_escaped;
         const follows_escape = backslash << 1 | parser.prev_escaped;
@@ -1226,11 +1226,9 @@ pub const Parser = struct {
         const even_bits: u64 = 0x5555555555555555;
         const odd_sequence_starts = backslash & ~even_bits & ~follows_escape;
         // cmn.println("{b:0>64} | prev_escaped a", .{@bitReverse(parser.prev_escaped)});
-        var sequences_starting_on_even_bits: u64 = undefined;
-        parser.prev_escaped = @boolToInt(@addWithOverflow(u64, odd_sequence_starts, backslash, &sequences_starting_on_even_bits));
-        // const xy = @addWithOverflow(odd_sequence_starts, backslash);
-        // const sequences_starting_on_even_bits: u64 = xy[0];
-        // parser.prev_escaped = xy[1];
+        const x = @addWithOverflow(odd_sequence_starts, backslash);
+        const sequences_starting_on_even_bits: u64 = x[0];
+        parser.prev_escaped = x[1];
         // cmn.println("{b:0>64} | prev_escaped b", .{@bitReverse(parser.prev_escaped)});
         const invert_mask = sequences_starting_on_even_bits << 1; // The mask we want to return is the *escaped* bits, not escapes.
 
@@ -1239,7 +1237,7 @@ pub const Parser = struct {
         return (even_bits ^ invert_mask) & follows_escape;
     }
 
-    inline fn nextStringBlock(parser: *Parser, input_vec: v.u8x64) StringBlock {
+    fn nextStringBlock(parser: *Parser, input_vec: v.u8x64) StringBlock {
         const backslash_vec = input_vec == @splat(64, @as(u8, '\\'));
         const backslash = @bitCast(u64, backslash_vec);
         const escaped = parser.find_escaped(backslash);
@@ -1318,7 +1316,7 @@ pub const Parser = struct {
         return parser.stage2();
     }
 
-    pub fn element(parser: Parser) Element {
+    pub inline fn element(parser: Parser) Element {
         return .{
             .tape = .{ .doc = &parser.doc, .idx = 1 },
         };
@@ -1468,35 +1466,35 @@ const TapeRef = struct {
     doc: *const Document,
     idx: usize,
 
-    pub inline fn is(tr: TapeRef, tt: TapeType) bool {
+    pub fn is(tr: TapeRef, tt: TapeType) bool {
         return tr.tape_ref_type() == tt;
     }
-    pub inline fn tape_ref_type(tr: TapeRef) TapeType {
+    pub fn tape_ref_type(tr: TapeRef) TapeType {
         return TapeType.from_u64(tr.current());
     }
-    pub inline fn value(tr: TapeRef) u64 {
+    pub fn value(tr: TapeRef) u64 {
         return TapeType.extract_value(tr.current());
     }
-    pub inline fn next_value(tr: TapeRef) u64 {
+    pub fn next_value(tr: TapeRef) u64 {
         return TapeType.extract_value(tr.doc.tape.items[tr.idx + 1]);
     }
-    pub inline fn after_element(tr: TapeRef) u64 {
+    pub fn after_element(tr: TapeRef) u64 {
         return switch (tr.tape_ref_type()) {
             .START_ARRAY, .START_OBJECT => tr.matching_brace_idx(),
             .UINT64, .INT64, .DOUBLE => tr.idx + 2,
             else => tr.idx + 1,
         };
     }
-    pub inline fn matching_brace_idx(tr: TapeRef) u32 {
+    pub fn matching_brace_idx(tr: TapeRef) u32 {
         const result = @truncate(u32, tr.current());
         // std.log.debug("TapeRef matching_brace_idx() for {} {}", .{ tr.tape_ref_type(), result });
         return result;
     }
-    pub inline fn current(tr: TapeRef) u64 {
+    pub fn current(tr: TapeRef) u64 {
         // std.log.warn("TapeRef current() idx {} len/cap {}/{}", .{ tr.idx, tr.doc.tape.items.len, tr.doc.tape.capacity });
         return tr.doc.tape.items[tr.idx];
     }
-    pub inline fn scope_count(tr: TapeRef) u32 {
+    pub fn scope_count(tr: TapeRef) u32 {
         return @truncate(u32, (tr.current() >> 32) & TapeType.count_mask);
     }
 
@@ -1563,7 +1561,7 @@ const TapeRefIterator = struct {
 const Element = struct {
     tape: TapeRef,
 
-    pub inline fn at_pointer(ele: Element, json_pointer: []const u8) cmn.Error!Element {
+    pub fn at_pointer(ele: Element, json_pointer: []const u8) cmn.Error!Element {
         return switch (ele.tape.tape_ref_type()) {
             .START_OBJECT => (try ele.get_object()).at_pointer(json_pointer),
             .START_ARRAY => (try ele.get_array()).at_pointer(json_pointer),
@@ -1698,7 +1696,8 @@ const Element = struct {
             ele.next_tape_value(u64);
     }
     pub fn get_double(ele: Element) !f64 {
-        return (try ele.get_tape_type(.DOUBLE)).DOUBLE;
+        const val = try ele.get_tape_type(.DOUBLE);
+        return val.DOUBLE;
     }
     pub fn get_string(ele: Element) ![]const u8 {
         return (try ele.get_tape_type(.STRING)).STRING;

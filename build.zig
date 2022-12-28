@@ -2,10 +2,8 @@ const std = @import("std");
 
 fn setup(step: *std.build.LibExeObjStep, mode: std.builtin.Mode, target: anytype, options: *std.build.OptionsStep) void {
     step.setTarget(target);
-    step.linkLibC();
     step.setBuildMode(mode);
     step.addOptions("build_options", options);
-    step.use_stage1 = true;
 }
 
 pub fn build(b: *std.build.Builder) void {
@@ -43,7 +41,6 @@ pub fn build(b: *std.build.Builder) void {
 
     var main_tests = b.addTest("src/tests.zig");
     setup(main_tests, mode, target, options);
-    // main_tests.setFilter("ondemand struct iteration types");
 
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&main_tests.step);
