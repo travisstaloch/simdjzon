@@ -1,7 +1,7 @@
 name: Linux
 on:
   push:
-    branches: [ main ]
+    branches: [ main, tag-0.10, stage2-rewrite ]
   pull_request:
     branches: [ main ]
   schedule:
