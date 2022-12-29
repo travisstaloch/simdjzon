@@ -3,11 +3,48 @@
 # simdjzon
 This is a port of [simdjson](https://github.com/simdjson/simdjson), a high performance JSON parser developed by Daniel Lemire and Geoff Langdale to [zig](https://ziglang.org/).  
 
+# cpu support
+Only 64 bit CPUs are supported so far.
 
-# requirements
-A CPU with both AVX2 and CLMUL is required (Haswell from 2013 onwards should do for Intel, for AMD a Ryzen/EPYC CPU (Q1 2017) should be sufficient).  
+#### x86_64
+A CPU with AVX is required and CLMUL is preferred. the following usually have
+both
+* Intel - Haswell from 2013 onwards
+* AMD - Ryzen/EPYC CPU (Q1 2017)
 
-No fallback for unsupported CPUs is provided (yet).
+These commands show how to test for specific target and cpu support
+```console
+zig build test -Dtarget=x86_64-linux -Dcpu=x86_64+avx # uses clmulSoft - missing pclmul
+zig build test -Dtarget=x86_64-linux -Dcpu=x86_64+avx+pclmul
+# zig build test -Dtarget=x86_64-linux # doesn't work - missing avx
+# zig build test -Dcpu=x86_64_v2 # doesn't work - missing avx
+```
+
+#### aarch64
+A CPU with AES is preferred.
+```console
+zig build test -Dtarget=aarch64-linux -Dcpu=apple_latest-aes -fqemu # uses clmulSoft
+zig build test -Dtarget=aarch64-linux -fqemu
+```
+
+#### powerpc
+Not supported yet
+```console
+# zig build test -Dtarget=powerpc-linux -fqemu # doesn't work - no classify() + 32bit errors
+# zig build test -Dtarget=powerpc64-linux -fqemu # doesn't work - no classify()
+```
+
+#### fallback
+No fallback for unsupported CPUs is provided yet.
+
+```console
+# zig build test -Dcpu=baseline # doesn't work - no classify()
+```
+
+# zig compiler support
+The main branch is meant to compile with zig's master branch.  It is tested weekly on linux, windows and macos. 
+
+The zig-0.10.0 branch works with zig's 0.10.0 release.  It is tested on linux only when it is updated.
 
 # usage
 ```console
