@@ -23,10 +23,10 @@ jobs:
       with:
         version: master
 
-    - run: zig build test
-    - run: zig build test -Dstep-128
-    - run: zig build
-    - run: zig build -Dondemand
-    - run: zig build -Dstep-128 
-    - run: zig build -Dondemand -Dstep-128
+    - run: zig build -Dtarget=aarch64-macos test
+    - run: zig build -Dtarget=aarch64-macos test -Dstep-128
+    - run: zig build -Dtarget=aarch64-macos
+    - run: zig build -Dtarget=aarch64-macos -Dondemand
+    - run: zig build -Dtarget=aarch64-macos -Dstep-128 
+    - run: zig build -Dtarget=aarch64-macos -Dondemand -Dstep-128
   

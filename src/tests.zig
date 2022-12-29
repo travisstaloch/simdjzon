@@ -9,7 +9,7 @@ const ondemand = simdjzon.ondemand;
 const cmn = @import("common.zig");
 
 const allr = testing.allocator;
-test "tape build" {
+test "tape build 1" {
     std.debug.print("\n", .{});
     const f = try std.fs.cwd().openFile("test/test.json", .{});
     defer f.close();

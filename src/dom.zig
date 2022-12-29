@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const mem = std.mem;
 const os = std.os;
@@ -11,6 +12,10 @@ const number_parsing = @import("number_parsing.zig");
 const atom_parsing = @import("atom_parsing.zig");
 const Logger = @import("Logger.zig");
 const cmn = @import("common.zig");
+const Chunk = cmn.Chunk;
+const IChunk = cmn.IChunk;
+const ChunkArr = cmn.ChunkArr;
+const chunk_len = cmn.chunk_len;
 
 pub const Document = struct {
     tape: std.ArrayListUnmanaged(u64),
@@ -65,7 +70,7 @@ const BitIndexer = struct {
         // In some instances, the next branch is expensive because it is mispredicted.
         // Unfortunately, in other cases,
         // it helps tremendously.
-        // cmn.print("{b:0>64} | bits", .{@bitReverse(bits_)});
+        // cmn.println("{b:0>64} | write() bits", .{@bitReverse(bits_)});
         if (bits == 0) {
             // cmn.println("", .{});
             return;
@@ -108,44 +113,39 @@ const BitIndexer = struct {
             }
         }
 
-        // std.log.debug("tail.items.len {d} start_count + cnt {d}", .{ indexer.tail.items.len, start_count + cnt });
+        // cmn.println("tail.items.len {d} start_count + cnt {d}", .{ indexer.tail.items.len, start_count + cnt });
         indexer.tail.shrinkRetainingCapacity(start_count + cnt);
     }
 };
 
-const Utf8Checker = struct {
-    err: v.u8x32 = [1]u8{0} ** 32,
-    prev_input_block: v.u8x32 = [1]u8{0} ** 32,
-    prev_incomplete: v.u8x32 = [1]u8{0} ** 32,
 
-    fn prev(comptime N: u8, chunk: v.u8x32, prev_chunk: v.u8x32) v.u8x32 {
+const Utf8Checker = struct {
+    err: Chunk = zeros,
+    prev_input_block: Chunk = zeros,
+    prev_incomplete: Chunk = zeros,
+
+    const zeros: ChunkArr = [1]u8{0} ** chunk_len;
+
+    fn prev(comptime N: u8, chunk: Chunk, prev_chunk: Chunk) Chunk {
         return switch (N) {
             1 => blk: {
                 const cprev = c._prev1(chunk, prev_chunk);
-                // const cprev_old = c._prev1_old(chunk, prev_chunk);
-                // const eql = @reduce(.And, cprev == cprev_old);
-                // if(!eql) std.debug.panic("prev({}) cprev != cprev_old\ncprev     {}\ncprev_old {}", .{N, cprev, cprev_old});
                 break :blk cprev;
             },
             2 => blk: {
                 const cprev = c._prev2(chunk, prev_chunk);
-                // const cprev_old = c._prev2_old(chunk, prev_chunk);
-                // const eql = @reduce(.And, cprev == cprev_old);
-                // if(!eql) std.debug.panic("prev({}) cprev != cprev_old\ncprev     {}\ncprev_old {}", .{N, cprev, cprev_old});
                 break :blk cprev;
             },
             3 => blk: {
                 const cprev = c._prev3(chunk, prev_chunk);
-                // const cprev_old = c._prev3_old(chunk, prev_chunk);
-                // const eql = @reduce(.And, cprev == cprev_old);
-                // if(!eql) std.debug.panic("prev({}) cprev != cprev_old\ncprev     {}\ncprev_old {}", .{N, cprev, cprev_old});
                 break :blk cprev;
             },
             else => unreachable,
         };
     }
+    const check_special_cases = if (cmn.is_arm64) check_special_cases_arm64 else check_special_cases_x86;
     // zig fmt: off
-    fn check_special_cases(input: v.u8x32, prev1: v.u8x32) v.u8x32 {
+    fn check_special_cases_x86(input: Chunk, prev1: Chunk) Chunk {
         // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
         // Bit 1 = Too Long (ASCII followed by continuation)
         // Bit 2 = Overlong 3-byte
@@ -240,37 +240,137 @@ const Utf8Checker = struct {
         const byte_2_high = c.mm256_shuffle_epi8(tbl3, byte_2_high_0);
         return (byte_1_high & byte_1_low & byte_2_high);
     }
+    
+    fn check_special_cases_arm64(input: Chunk, prev1: Chunk) Chunk {
+        // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
+        // Bit 1 = Too Long (ASCII followed by continuation)
+        // Bit 2 = Overlong 3-byte
+        // Bit 4 = Surrogate
+        // Bit 5 = Overlong 2-byte
+        // Bit 7 = Two Continuations
+     
+        const TOO_SHORT: u8 = 1 << 0;   // 11______ 0_______
+                                        // 11______ 11______
+        const TOO_LONG: u8 = 1 << 1;    // 0_______ 10______
+        const OVERLONG_3: u8 = 1 << 2;  // 11100000 100_____
+        const SURROGATE: u8 = 1 << 4;   // 11101101 101_____
+        const OVERLONG_2: u8 = 1 << 5;  // 1100000_ 10______
+        const TWO_CONTS: u8 = 1 << 7;   // 10______ 10______
+        const TOO_LARGE: u8 = 1 << 3;   // 11110100 1001____
+                                        // 11110100 101_____
+                                        // 11110101 1001____
+                                        // 11110101 101_____
+                                        // 1111011_ 1001____
+                                        // 1111011_ 101_____
+                                        // 11111___ 1001____
+                                        // 11111___ 101_____
+        const TOO_LARGE_1000: u8 = 1 << 6;
+                                        // 11110101 1000____
+                                        // 1111011_ 1000____
+                                        // 11111___ 1000____
+        const OVERLONG_4: u8 = 1 << 6;  // 11110000 1000____
+
+        const byte_1_high_0 = prev1 >> @splat(chunk_len, @as(u3, 4));
+        const tbl1 = [16]u8{
+            // 0_______ ________ <ASCII in byte 1>
+            TOO_LONG,               TOO_LONG,  TOO_LONG,                           TOO_LONG,
+            TOO_LONG,               TOO_LONG,  TOO_LONG,                           TOO_LONG,
+            // 10______ ________ <continuation in byte 1>
+            TWO_CONTS,              TWO_CONTS, TWO_CONTS,                          TWO_CONTS,
+            // 1100____ ________ <two byte lead in byte 1>
+            TOO_SHORT | OVERLONG_2,
+            // 1101____ ________ <two byte lead in byte 1>
+            TOO_SHORT,
+            // 1110____ ________ <three byte lead in byte 1>
+            TOO_SHORT | OVERLONG_3 | SURROGATE,
+            // 1111____ ________ <four+ byte lead in byte 1>
+            TOO_SHORT | TOO_LARGE | TOO_LARGE_1000 | OVERLONG_4,
+        };
+
+        const byte_1_high = c.lookup_16_aarch64(byte_1_high_0, tbl1); 
+        const CARRY: u8 = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
+        const byte_1_low0 = prev1 & @splat(chunk_len, @as(u8, 0x0F));
+        
+        const tbl2 = [16]u8{
+            // ____0000 ________
+            CARRY | OVERLONG_3 | OVERLONG_2 | OVERLONG_4,
+            // ____0001 ________
+            CARRY | OVERLONG_2,
+            // ____001_ ________
+            CARRY,
+            CARRY,
+            
+            // ____0100 ________
+            CARRY | TOO_LARGE,
+            // ____0101 ________
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
+            // ____011_ ________
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
+
+            // ____1___ ________
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
+            // ____1101 ________
+            CARRY | TOO_LARGE | TOO_LARGE_1000 | SURROGATE,
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
+            CARRY | TOO_LARGE | TOO_LARGE_1000,
+        };
+        // const byte_1_low = c.mm256_shuffle_epi8(tbl2, byte_1_low0);
+        const byte_1_low = c.lookup_16_aarch64(byte_1_low0, tbl2);
+
+        const byte_2_high_0 = input >> @splat(chunk_len, @as(u3, 4));
+        const tbl3 = [16]u8{
+            // ________ 0_______ <ASCII in byte 2>
+            TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
+            TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
+            // ________ 1000____
+            TOO_LONG | OVERLONG_2 | TWO_CONTS | OVERLONG_3 | TOO_LARGE_1000 | OVERLONG_4,
+            // ________ 1001____
+            TOO_LONG | OVERLONG_2 | TWO_CONTS | OVERLONG_3 | TOO_LARGE,
+            // ________ 101_____
+            TOO_LONG | OVERLONG_2 | TWO_CONTS | SURROGATE | TOO_LARGE, TOO_LONG | OVERLONG_2 | TWO_CONTS | SURROGATE | TOO_LARGE,
+            // ________ 11______
+            TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
+        };
+        const byte_2_high = c.lookup_16_aarch64(byte_2_high_0, tbl3);
+        return (byte_1_high & byte_1_low & byte_2_high);
+    }
     // zig fmt: on
 
-    fn check_multibyte_lengths(input: v.u8x32, prev_input: v.u8x32, sc: v.u8x32) v.u8x32 {
+    fn check_multibyte_lengths(input: Chunk, prev_input: Chunk, sc: Chunk) Chunk {
         const prev2 = prev(2, input, prev_input);
         const prev3 = prev(3, input, prev_input);
         const must23 = must_be_2_3_continuation(prev2, prev3);
-        // std.log.debug("input {s} prev_input {s} must23 {}", .{ @as([32]u8, input), @as([32]u8, prev_input), must23 });
-        const must23_80 = must23 & @splat(32, @as(u8, 0x80));
+        // cmn.println("\nprev2 {}\nprev3 {}\nmust23 {}", .{ prev2, prev3, must23 });
+        const must23_80 = must23 & @splat(chunk_len, @as(u8, 0x80));
         return must23_80 ^ sc;
     }
 
-    fn must_be_2_3_continuation(prev2: v.u8x32, prev3: v.u8x32) v.u8x32 {
+    fn must_be_2_3_continuation(prev2: Chunk, prev3: Chunk) Chunk {
         // do unsigned saturating subtraction, then interpret as signed so we can check if > 0 below
         const is_third_byte = @bitCast(
-            v.i8x32,
-            prev2 -| @splat(32, @as(u8, 0b11100000 - 1)),
+            IChunk,
+            prev2 -| @splat(chunk_len, @as(u8, 0b11100000 - 1)),
         ); // Only 111_____ will be > 0
         const is_fourth_byte = @bitCast(
-            v.i8x32,
-            prev3 -| @splat(32, @as(u8, 0b11110000 - 1)),
+            IChunk,
+            prev3 -| @splat(chunk_len, @as(u8, 0b11110000 - 1)),
         ); // Only 1111____ will be > 0
 
         // Caller requires a bool (all 1's). All values resulting from the subtraction will be <= 64, so signed comparison is fine.
-        const result = @bitCast(v.i1x32, (is_third_byte | is_fourth_byte) > @splat(32, @as(i8, 0)));
-        return @bitCast(v.u8x32, @as(v.i8x32, result));
+        const i1xchunk_len = @Vector(chunk_len, i1);
+        const result = @bitCast(i1xchunk_len, (is_third_byte | is_fourth_byte) > @splat(chunk_len, @as(i8, 0)));
+        return @bitCast(Chunk, @as(IChunk, result));
     }
 
     //
     // Check whether the current bytes are valid UTF-8.
     //
-    fn check_utf8_bytes(checker: *Utf8Checker, input: v.u8x32, prev_input: v.u8x32) void {
+    fn check_utf8_bytes(checker: *Utf8Checker, input: Chunk, prev_input: Chunk) void {
         // Flip prev1...prev3 so we can easily determine if they are 2+, 3+ or 4+ lead bytes
         // (2, 3, 4-byte leads become large positive numbers instead of small negative numbers)
         const prev1 = prev(1, input, prev_input);
@@ -299,28 +399,33 @@ const Utf8Checker = struct {
 
     fn check_next_input(checker: *Utf8Checker, input: v.u8x64) void {
         // const NUM_CHUNKS = cmn.STEP_SIZE / 32;
-        const NUM_CHUNKS = 2;
-        const chunks = @bitCast([NUM_CHUNKS][32]u8, input);
+        
         if (is_ascii(input)) {
+            // cmn.println("is_ascii checker.prev_incomplete {}", .{checker.prev_incomplete});
             checker.err |= checker.prev_incomplete;
         } else {
+            // cmn.println("!is_ascii", .{});
             // you might think that a for-loop would work, but under Visual Studio, it is not good enough.
             // static_assert((simd8x64<uint8_t>::NUM_CHUNKS == 2) || (simd8x64<uint8_t>::NUM_CHUNKS == 4),
             // "We support either two or four chunks per 64-byte block.");
-            if (NUM_CHUNKS == 2) {
+            if (cmn.is_x86_64) {
+                const NUM_CHUNKS = 2;
+                const chunks = @bitCast([NUM_CHUNKS][32]u8, input);
                 checker.check_utf8_bytes(chunks[0], checker.prev_input_block);
                 checker.check_utf8_bytes(chunks[1], chunks[0]);
+                checker.prev_incomplete = is_incomplete(chunks[NUM_CHUNKS - 1]);
+                checker.prev_input_block = chunks[NUM_CHUNKS - 1];
+            } else if (cmn.is_arm64) {
+                const NUM_CHUNKS = 4;
+                const chunks = @bitCast([NUM_CHUNKS][16]u8, input);
+                checker.check_utf8_bytes(chunks[0], checker.prev_input_block);
+                checker.check_utf8_bytes(chunks[1], chunks[0]);
+                checker.check_utf8_bytes(chunks[2], chunks[1]);
+                checker.check_utf8_bytes(chunks[3], chunks[2]);
+                checker.prev_incomplete = is_incomplete(chunks[NUM_CHUNKS - 1]);
+                checker.prev_input_block = chunks[NUM_CHUNKS - 1];
             }
-            // TODO: NUM_CHUNKS = 4
-            // else if (NUM_CHUNKS == 4) {
-            //     checker.check_utf8_bytes(chunks[0], checker.prev_input_block);
-            //     checker.check_utf8_bytes(chunks[1], chunks[0]);
-            //     checker.check_utf8_bytes(chunks[2], chunks[1]);
-            //     checker.check_utf8_bytes(chunks[3], chunks[2]);
-            // }
             else unreachable;
-            checker.prev_incomplete = is_incomplete(chunks[NUM_CHUNKS - 1]);
-            checker.prev_input_block = chunks[NUM_CHUNKS - 1];
         }
     }
     // do not forget to call check_eof!
@@ -333,7 +438,7 @@ const Utf8Checker = struct {
     // Return nonzero if there are incomplete multibyte characters at the end of the block:
     // e.g. if there is a 4-byte character, but it's 3 bytes from the end.
     //
-    fn is_incomplete(input: v.u8x32) v.u8x32 {
+    fn is_incomplete(input: Chunk) Chunk {
         // If the previous input's last 3 bytes match this, they're too short (they ended at EOF):
         // ... 1111____ 111_____ 11______
         const max_array: [32]u8 = .{
@@ -342,7 +447,7 @@ const Utf8Checker = struct {
             255, 255, 255, 255, 255, 255,            255,            255,
             255, 255, 255, 255, 255, 0b11110000 - 1, 0b11100000 - 1, 0b11000000 - 1,
         };
-        const max_value = @splat(32, max_array[@sizeOf(@TypeOf(max_array)) - @sizeOf(v.u8x32)]);
+        const max_value = @splat(chunk_len, max_array[@sizeOf(@TypeOf(max_array)) - @sizeOf(v.u8x32)]);
         return input -| max_value;
     }
 };
@@ -409,7 +514,7 @@ const CharacterBlock = struct {
             c.mm256_shuffle_epi8(whitespace_table, chunk0),
             c.mm256_shuffle_epi8(whitespace_table, chunk1),
         };
-        const whitespace = input_vec == @bitCast(v.u8x64, wss);
+        const ws = input_vec == @bitCast(v.u8x64, wss);
         // Turn [ and ] into { and }
         const curlified = input_vec | @splat(64, @as(u8, 0x20));
         const ops: [2]v.u8x32 = .{
@@ -424,9 +529,90 @@ const CharacterBlock = struct {
         //     }
         //     cmn.println("{s} | CharacterBlock.classify() ops", .{s});
         // }
-        const op = curlified == @bitCast(v.u8x64, ops);
+        const whitespace = @bitCast(u64, ws);
+        const op = @bitCast(u64, curlified == @bitCast(v.u8x64, ops));
 
-        return .{ .whitespace = @bitCast(u64, whitespace), .op = @bitCast(u64, op) };
+        // cmn.println("{b:0>64} | whitespace", .{@bitReverse(whitespace)});
+        // cmn.println("{b:0>64} | op", .{@bitReverse(op)});
+
+        return .{ .whitespace = whitespace, .op = op };
+    }
+
+    pub fn classify_arm64(input_vec: v.u8x64) CharacterBlock {
+        // Functional programming causes trouble with Visual Studio.
+        // Keeping this version in comments since it is much nicer:
+        // auto v = in.map<uint8_t>([&](simd8<uint8_t> chunk) {
+        //  auto nib_lo = chunk & 0xf;
+        //  auto nib_hi = chunk.shr<4>();
+        //  auto shuf_lo = nib_lo.lookup_16<uint8_t>(16, 0, 0, 0, 0, 0, 0, 0, 0, 8, 12, 1, 2, 9, 0, 0);
+        //  auto shuf_hi = nib_hi.lookup_16<uint8_t>(8, 0, 18, 4, 0, 1, 0, 1, 0, 0, 0, 3, 2, 1, 0, 0);
+        //  return shuf_lo & shuf_hi;
+        // });
+        const in = @bitCast([64]u8, input_vec);
+        const chunk0: v.u8x16 = in[0..16].*;
+        const chunk1: v.u8x16 = in[16..32].*;
+        const chunk2: v.u8x16 = in[32..48].*;
+        const chunk3: v.u8x16 = in[48..].*;
+        const lo = @splat(16, @as(u8, 0xf));
+        const fours = @splat(16, @as(u3, 4));
+
+        const tables: [2]v.u8x16 = .{
+            .{ 16, 0, 0, 0, 0, 0, 0, 0, 0, 8, 12, 1, 2, 9, 0, 0 },
+            .{ 8, 0, 18, 4, 0, 1, 0, 1, 0, 0, 0, 3, 2, 1, 0, 0 },
+        };
+        const table1 = tables[0];
+        const table2 = tables[1];
+        
+        const vv: v.u8x64 =
+            @as([16]u8, c.lookup_16_aarch64(chunk0 & lo, table1) & c.lookup_16_aarch64(chunk0 >> fours, table2)) ++
+            @as([16]u8, c.lookup_16_aarch64(chunk1 & lo, table1) & c.lookup_16_aarch64(chunk1 >> fours, table2)) ++
+            @as([16]u8, c.lookup_16_aarch64(chunk2 & lo, table1) & c.lookup_16_aarch64(chunk2 >> fours, table2)) ++
+            @as([16]u8, c.lookup_16_aarch64(chunk3 & lo, table1) & c.lookup_16_aarch64(chunk3 >> fours, table2));
+
+        // cmn.println("vv {}", .{vv});
+        // We compute whitespace and op separately. If the code later only use one or the
+        // other, given the fact that all functions are aggressively inlined, we can
+        // hope that useless computations will be omitted. This is namely case when
+        // minifying (we only need whitespace). *However* if we only need spaces,
+        // it is likely that we will still compute 'v' above with two lookup_16: one
+        // could do it a bit cheaper. This is in contrast with the x64 implementations
+        // where we can, efficiently, do the white space and structural matching
+        // separately. One reason for this difference is that on ARM NEON, the table
+        // lookups either zero or leave unchanged the characters exceeding 0xF whereas
+        // on x64, the equivalent instruction (pshufb) automatically applies a mask,
+        // ignoring the 4 most significant bits. Thus the x64 implementation is
+        // optimized differently. This being said, if you use this code strictly
+        // just for minification (or just to identify the structural characters),
+        // there is a small untaken optimization opportunity here. We deliberately
+        // do not pick it up.
+        
+        const vchunks = @bitCast([64]u8, vv);
+        const vchunk0: v.u8x16 = vchunks[0..16].*;
+        const vchunk1: v.u8x16 = vchunks[16..32].*;
+        const vchunk2: v.u8x16 = vchunks[32..48].*;
+        const vchunk3: v.u8x16 = vchunks[48..].*;
+        const zeros = @splat(16, @as(u8, 0));
+        const sevens = @splat(16, @as(u8, 0x7));
+        const ops: [4]u16 = .{
+            @bitCast(u16, c.any_bits_set_aarch64( vchunk0, sevens) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64( vchunk1, sevens) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64( vchunk2, sevens) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64( vchunk3, sevens) != zeros),
+        };
+
+        const ws = @splat(16, @as(u8, 0x18));
+        const wss: [4]u16 = .{
+            @bitCast(u16, c.any_bits_set_aarch64( vchunk0, ws) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64( vchunk1, ws) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64( vchunk2, ws) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64( vchunk3, ws) != zeros),
+        };
+        const whitespace = @bitCast(u64, wss);
+        const op = @bitCast(u64, ops);
+        // cmn.println("{b:0>64} | whitespace", .{@bitReverse(whitespace)});
+        // cmn.println("{b:0>64} | op", .{@bitReverse(op)});
+
+        return .{ .whitespace = whitespace, .op = op };
     }
 
     pub fn scalar(cb: CharacterBlock) u64 {
@@ -479,7 +665,17 @@ pub const StructuralIndexer = struct {
     fn nextBlock(parser: *Parser, input_vec: v.u8x64) Block {
         const string = parser.nextStringBlock(input_vec);
         // identifies the white-space and the structurat characters
-        const characters = CharacterBlock.classify(input_vec);
+        // missing cpu feature set: x86_64+sse2. please provide -mcpu=x86_64+sse2
+
+        const characters = if (cmn.is_x86_64 and cmn.has_avx)
+            CharacterBlock.classify(input_vec)
+        else if (cmn.is_arm64)
+            CharacterBlock.classify_arm64(input_vec)
+        else
+            @compileError(std.fmt.comptimePrint(
+                "TODO provide fallback CharacterBlock.classify() for arch {s} with has_avx={}", 
+                .{@tagName(builtin.cpu.arch), cmn.has_avx},
+            ));
 
         // The term "scalar" refers to anything except structural characters and white space
         // (so letters, numbers, quotes).

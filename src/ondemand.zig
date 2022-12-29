@@ -136,7 +136,7 @@ pub const Value = struct {
                                         var obj = try val.get_object();
                                         inline for (std.meta.fields(C)) |field| {
                                             const field_info = @typeInfo(field.type);
-                                            if (obj.find_field_unordered(field.name)) |obj_val_|{
+                                            if (obj.find_field_unordered(field.name)) |obj_val_| {
                                                 var obj_val = obj_val_;
                                                 if (field_info != .Pointer)
                                                     try obj_val.get(&@field(out, field.name), options)
@@ -146,8 +146,7 @@ pub const Value = struct {
                                                     else
                                                         try obj_val.get(@field(out, field.name), options);
                                                 }
-                                            }
-                                            else |_| {}
+                                            } else |_| {}
                                         }
                                     },
                                     else => return error.INCORRECT_TYPE,
@@ -438,7 +437,7 @@ pub const Iterator = struct {
     }
     pub fn skip_child(iter: *Iterator, parent_depth: u32) !void {
         if (iter.depth <= parent_depth) return;
-        
+
         switch ((try iter.advance(1))[0]) {
             // TODO consider whether matching braces is a requirement: if non-matching braces indicates
             // *missing* braces, then future lookups are not in the object/arrays they think they are,
@@ -1381,7 +1380,7 @@ pub const Parser = struct {
         // cmn.println("peek() len_hint {} READ_BUF_CAP {}", .{ len_hint, READ_BUF_CAP });
         if (len_hint > READ_BUF_CAP) return error.CAPACITY;
         // cmn.println("\nTokenIterator: {} <= start {} end {} < read_buf_start_pos + len {}", .{ parser.read_buf_start_pos, start, end, read_buf_start_pos + read_buf_len });
-        cmn.println("parser {*} position {*} len_hint {}", .{parser, position, len_hint});
+        // cmn.println("parser {*} position {*} len_hint {}", .{parser, position, len_hint});
         const start_pos = position[0];
         if (parser.read_buf_start_pos <= start_pos and start_pos < parser.read_buf_start_pos + parser.read_buf_len) blk: {
             const offset = start_pos - parser.read_buf_start_pos;

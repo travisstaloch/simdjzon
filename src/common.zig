@@ -1,6 +1,9 @@
 const std = @import("std");
-
+const builtin = @import("builtin");
 const root = @import("root");
+const c = @import("c_intrinsics.zig");
+const v = @import("vector_types.zig");
+
 pub const STEP_SIZE = if (@hasDecl(root, "step_size")) root.step_size else 64;
 comptime {
     if (!(STEP_SIZE == 64 or STEP_SIZE == 128)) @compileError("step-size must be either 64 or 128");
@@ -93,3 +96,15 @@ pub const JsonError = error{
     /// The JSON doesn't have enough padding for simdjson to safely parse it.
     INSUFFICIENT_PADDING,
 };
+
+pub const has_sse2 = std.Target.x86.featureSetHas(builtin.cpu.features, .sse2);
+pub const has_avx = std.Target.x86.featureSetHas(builtin.cpu.features, .avx);
+pub const has_pclmul = std.Target.x86.featureSetHas(builtin.cpu.features, .pclmul);
+pub const has_armaes = std.Target.aarch64.featureSetHas(builtin.cpu.features, .aes);
+pub const is_arm64 = builtin.cpu.arch == .aarch64;
+pub const is_x86_64 = builtin.cpu.arch == .x86_64;
+
+pub const Chunk = if (is_x86_64) v.u8x32 else if (is_arm64) v.u8x16 else v.u8x8;
+pub const IChunk = if (is_x86_64) v.i8x32 else if (is_arm64) v.i8x16 else v.i8x8;
+pub const ChunkArr = [chunk_len]u8;
+pub const chunk_len = @sizeOf(Chunk);

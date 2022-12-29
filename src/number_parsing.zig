@@ -496,7 +496,7 @@ fn round(h: *Decimal) u64 {
         return std.math.maxInt(u64);
     }
     // at this point, we know that h.decimal_point >= 0
-    const dp: u64 = @intCast(u32, h.decimal_point);
+    const dp: usize = @intCast(u32, h.decimal_point);
     var n: u64 = 0;
     var i: u32 = 0;
 
@@ -839,9 +839,9 @@ inline fn compute_float_64(power: i64, _i: u64, negative: bool, d: *f64) bool {
         // and s / p will produce correctly rounded values.
         //
         if (power < 0) {
-            d.* /= power_of_ten[@intCast(u64, -power)];
+            d.* /= power_of_ten[@intCast(usize, -power)];
         } else {
-            d.* *= power_of_ten[@intCast(u64, power)];
+            d.* *= power_of_ten[@intCast(usize, power)];
         }
         if (negative) {
             d.* = -d.*;

@@ -1,12 +1,20 @@
 const std = @import("std");
 const builtin = @import("builtin");
-
-// from https://gist.github.com/sharpobject/80dc1b6f3aaeeada8c0e3a04ebc4b60a
-
 const v = @import("vector_types.zig");
+const cmn = @import("common.zig");
+const Chunk = cmn.Chunk;
+const chunk_len = cmn.chunk_len;
+const half_chunk_len = chunk_len / 2;
 
-fn __mm256_permute2x128_si256_0x21(a: v.u64x4, b: v.u64x4) v.u64x4 {
-    var ret: v.u64x4 = undefined;
+// ---
+// from https://gist.github.com/sharpobject/80dc1b6f3aaeeada8c0e3a04ebc4b60a
+// ---
+// thanks to sharpobject for these implementations which make it possible to get
+// rid of old utils.c and stop linking libc.
+// ---
+
+fn __mm256_permute2x128_si256_0x21(comptime V: type, a: V, b: V) V {
+    var ret: V = undefined;
     ret[0] = a[2];
     ret[1] = a[3];
     ret[2] = b[0];
@@ -14,46 +22,46 @@ fn __mm256_permute2x128_si256_0x21(a: v.u64x4, b: v.u64x4) v.u64x4 {
     return ret;
 }
 
-fn _mm256_permute2x128_si256_0x21(a: v.u8x32, b: v.u8x32) v.u8x32 {
-    return @bitCast(v.u8x32, __mm256_permute2x128_si256_0x21(@bitCast(v.u64x4, a), @bitCast(v.u64x4, b)));
+fn _mm256_permute2x128_si256_0x21(a: Chunk, b: Chunk) Chunk {
+    const V = if (chunk_len == 32) v.u64x4 else v.u32x4;
+    return @bitCast(Chunk, __mm256_permute2x128_si256_0x21(V, @bitCast(V, a), @bitCast(V, b)));
 }
 
-fn _mm256_alignr_epi8(a: v.u8x32, b: v.u8x32, comptime imm8: comptime_int) v.u8x32 {
-    var ret: v.u8x32 = undefined;
+fn _mm256_alignr_epi8(a: Chunk, b: Chunk, comptime imm8: comptime_int) Chunk {
+    var ret: Chunk = undefined;
     var i: usize = 0;
-    while (i + imm8 < 16) : (i += 1) {
+    while (i + imm8 < half_chunk_len) : (i += 1) {
         ret[i] = b[i + imm8];
     }
-    while (i < 16) : (i += 1) {
-        ret[i] = a[i + imm8 - 16];
+    while (i < half_chunk_len) : (i += 1) {
+        ret[i] = a[i + imm8 - half_chunk_len];
     }
-    while (i + imm8 < 32) : (i += 1) {
+    while (i + imm8 < chunk_len) : (i += 1) {
         ret[i] = b[i + imm8];
     }
-    while (i < 32) : (i += 1) {
-        ret[i] = a[i + imm8 - 16];
+    while (i < chunk_len) : (i += 1) {
+        ret[i] = a[i + imm8 - half_chunk_len];
     }
     return ret;
 }
 
-pub fn _prev1(a: v.u8x32, b: v.u8x32) v.u8x32 {
-    return _mm256_alignr_epi8(a, _mm256_permute2x128_si256_0x21(b, a), 16 - 1);
+pub fn _prev1(a: Chunk, b: Chunk) Chunk {
+    return _mm256_alignr_epi8(a, _mm256_permute2x128_si256_0x21(b, a), half_chunk_len - 1);
 }
 
-pub fn _prev2(a: v.u8x32, b: v.u8x32) v.u8x32 {
-    return _mm256_alignr_epi8(a, _mm256_permute2x128_si256_0x21(b, a), 16 - 2);
+pub fn _prev2(a: Chunk, b: Chunk) Chunk {
+    return _mm256_alignr_epi8(a, _mm256_permute2x128_si256_0x21(b, a), half_chunk_len - 2);
 }
 
-pub fn _prev3(a: v.u8x32, b: v.u8x32) v.u8x32 {
-    return _mm256_alignr_epi8(a, _mm256_permute2x128_si256_0x21(b, a), 16 - 3);
+pub fn _prev3(a: Chunk, b: Chunk) Chunk {
+    return _mm256_alignr_epi8(a, _mm256_permute2x128_si256_0x21(b, a), half_chunk_len - 3);
 }
 
-// end from https://gist.github.com/sharpobject/80dc1b6f3aaeeada8c0e3a04ebc4b60a
+// ---
+// --- end from https://gist.github.com/sharpobject/80dc1b6f3aaeeada8c0e3a04ebc4b60a
+// ---
 
 pub fn mm256_shuffle_epi8(x: v.u8x32, mask: v.u8x32) v.u8x32 {
-    const has_sse2 = comptime std.Target.x86.featureSetHas(builtin.cpu.features, .sse2);
-    if (builtin.cpu.arch != .x86_64 or !has_sse2)
-        @compileError("missing cpu feature set: x86_64+sse2. please provide -mcpu=x86_64+sse2");
     return asm (
         \\ vpshufb %[mask], %[x], %[out]
         : [out] "=x" (-> v.u8x32),
@@ -62,20 +70,48 @@ pub fn mm256_shuffle_epi8(x: v.u8x32, mask: v.u8x32) v.u8x32 {
     );
 }
 
+// https://developer.arm.com/architectures/instruction-sets/intrinsics/vqtbl1q_s8
+pub fn lookup_16_aarch64(x: v.u8x16, mask: v.u8x16) v.u8x16 {
+    // tbl     v0.16b, { v0.16b }, v1.16b
+    return asm (
+        \\tbl  %[out].16b, {%[mask].16b}, %[x].16b
+        : [out] "=&x" (-> v.u8x16),
+        : [x] "x" (x),
+          [mask] "x" (mask),
+    );
+}
+// https://developer.arm.com/architectures/instruction-sets/intrinsics/vtstq_u8
+pub fn any_bits_set_aarch64(x: v.u8x16, mask: v.u8x16) v.u8x16 {
+    // cmtst   v0.16b, v1.16b, v0.16b
+    return asm (
+        \\cmtst  %[out].16b, %[x].16b, %[mask].16b
+        : [out] "=&x" (-> v.u8x16),
+        : [x] "x" (x),
+          [mask] "x" (mask),
+    );
+}
+
 pub fn prefix_xor(bitmask: u64) u64 {
     // There should be no such thing with a processor supporting avx2
     // but not clmul.
-    const has_pclmul = comptime std.Target.x86.featureSetHas(builtin.cpu.features, .pclmul);
-    if (builtin.cpu.arch != .x86_64 or !has_pclmul)
-        @compileError("missing cpu feature set: x86_64+pclmul. please provide -mcpu=x86_64+pclmul");
+    // const has_pclmul = comptime std.Target.x86.featureSetHas(builtin.cpu.features, .pclmul);
     const all_ones = @bitCast(u128, @splat(16, @as(u8, 0xff)));
     const x = @bitCast(u128, [2]u64{ bitmask, 0 });
-    const m = clmulPclmul(x, all_ones, .lo);
+    const m = clmul(x, all_ones, .lo);
 
     return @bitCast([2]u64, m)[0];
 }
 
+const clmul = if (cmn.is_x86_64 and cmn.has_pclmul and cmn.has_avx)
+    clmulPclmul
+else if (cmn.is_arm64 and cmn.has_armaes)
+    clmulPmull
+else
+    clmulSoft;
+
+// ---
 // from zig/lib/std/crypto/ghash_polyval.zig
+// ---
 const Selector = enum { lo, hi, hi_lo };
 // Carryless multiplication of two 64-bit integers for x86_64.
 inline fn clmulPclmul(x: u128, y: u128, comptime half: Selector) u128 {
@@ -174,12 +210,6 @@ fn clmulSoft(x_: u128, y_: u128, comptime half: Selector) u128 {
         (z3 & 0x88888888888888888888888888888888) ^ extra;
 }
 
-const I256 = struct {
-    hi: u128,
-    lo: u128,
-    mid: u128,
-};
-
-pub extern fn _prev1_old(a: v.u8x32, b: v.u8x32) v.u8x32;
-pub extern fn _prev2_old(a: v.u8x32, b: v.u8x32) v.u8x32;
-pub extern fn _prev3_old(a: v.u8x32, b: v.u8x32) v.u8x32;
+// ---
+// end from zig/lib/std/crypto/ghash_polyval.zig
+// ---
