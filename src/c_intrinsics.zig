@@ -61,13 +61,13 @@ pub fn _prev3(a: Chunk, b: Chunk) Chunk {
 // --- end from https://gist.github.com/sharpobject/80dc1b6f3aaeeada8c0e3a04ebc4b60a
 // ---
 
-pub fn shuffle_fallback(x: v.u8x32, mask: v.u8x32) v.u8x32 {
-    _ = x;
-    _ = mask;
-    unreachable;
+pub inline fn shuffle_fallback(tbl: v.u8x32, x: v.u8x32) v.u8x32 {
+    var result: [32]u8 = undefined;
+    for (result) |_, j| result[j] = tbl[x[j]];
+    return result;
 }
 
-pub fn mm256_shuffle_epi8(x: v.u8x32, mask: v.u8x32) v.u8x32 {
+pub inline fn mm256_shuffle_epi8(x: v.u8x32, mask: v.u8x32) v.u8x32 {
     return asm (
         \\ vpshufb %[mask], %[x], %[out]
         : [out] "=x" (-> v.u8x32),
@@ -77,7 +77,7 @@ pub fn mm256_shuffle_epi8(x: v.u8x32, mask: v.u8x32) v.u8x32 {
 }
 
 // https://developer.arm.com/architectures/instruction-sets/intrinsics/vqtbl1q_s8
-pub fn lookup_16_aarch64(x: v.u8x16, mask: v.u8x16) v.u8x16 {
+pub inline fn lookup_16_aarch64(x: v.u8x16, mask: v.u8x16) v.u8x16 {
     // tbl     v0.16b, { v0.16b }, v1.16b
     return asm (
         \\tbl  %[out].16b, {%[x].16b}, %[mask].16b
@@ -87,7 +87,7 @@ pub fn lookup_16_aarch64(x: v.u8x16, mask: v.u8x16) v.u8x16 {
     );
 }
 // https://developer.arm.com/architectures/instruction-sets/intrinsics/vtstq_u8
-pub fn any_bits_set_aarch64(x: v.u8x16, mask: v.u8x16) v.u8x16 {
+pub inline fn any_bits_set_aarch64(x: v.u8x16, mask: v.u8x16) v.u8x16 {
     // cmtst   v0.16b, v1.16b, v0.16b
     return asm (
         \\cmtst  %[out].16b, %[x].16b, %[mask].16b
@@ -97,7 +97,7 @@ pub fn any_bits_set_aarch64(x: v.u8x16, mask: v.u8x16) v.u8x16 {
     );
 }
 
-pub fn prefix_xor(bitmask: u64) u64 {
+pub inline fn prefix_xor(bitmask: u64) u64 {
     // There should be no such thing with a processor supporting avx2
     // but not clmul.
     // const has_pclmul = comptime std.Target.x86.featureSetHas(builtin.cpu.features, .pclmul);

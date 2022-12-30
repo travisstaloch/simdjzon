@@ -1,50 +1,38 @@
 :warning: **Work in progress.  Expect bugs and/or missing features** :warning:
 
 # simdjzon
-This is a port of [simdjson](https://github.com/simdjson/simdjson), a high performance JSON parser developed by Daniel Lemire and Geoff Langdale to [zig](https://ziglang.org/).  
+This is a port of [simdjson](https://github.com/simdjson/simdjson), a high performance JSON parser developed by Daniel Lemire and Geoff Langdale to [zig](https://ziglang.org/).
 
 # cpu support
-Only 64 bit CPUs are supported so far.
+Only 64 bit CPUs are supported so far.  See [test/test-all-cpu-features.sh](test/test-all-cpu-features.sh) which documents supported cpu features by showing how to test for specific target and cpu support.
 
 #### x86_64
-A CPU with AVX is required and CLMUL is preferred. the following usually have
+A CPU with AVX is required and CLMUL is faster. the following usually have
 both
 * Intel - Haswell from 2013 onwards
 * AMD - Ryzen/EPYC CPU (Q1 2017)
 
-These commands show how to test for specific target and cpu support
-```console
-zig build test -Dtarget=x86_64-linux -Dcpu=x86_64+avx # uses clmulSoft - missing pclmul
-zig build test -Dtarget=x86_64-linux -Dcpu=x86_64+avx+pclmul
-# zig build test -Dtarget=x86_64-linux # doesn't work - missing avx
-# zig build test -Dcpu=x86_64_v2 # doesn't work - missing avx
-```
-
 #### aarch64
-A CPU with AES is preferred.
-```console
-zig build test -Dtarget=aarch64-linux -Dcpu=apple_latest-aes -fqemu # uses clmulSoft
-zig build test -Dtarget=aarch64-linux -fqemu
-```
+A CPU with AES is faster.
 
 #### powerpc
 Not supported yet
-```console
-# zig build test -Dtarget=powerpc-linux -fqemu # doesn't work - no classify() + 32bit errors
-# zig build test -Dtarget=powerpc64-linux -fqemu # doesn't work - no classify()
-```
 
 #### fallback
-No fallback for unsupported CPUs is provided yet.
+A fallback implementation for unsupported CPUs is provided.  Here it's runtime is 2.7 times greater on x86_64.
 
 ```console
-# zig build test -Dcpu=baseline # doesn't work - no classify()
+$ zig build run -Drelease-fast -- test/twitter.json -v
+valid parse in 2.875ms
+
+$ zig build run -Drelease-fast -Dcpu=baseline -- test/twitter.json -v
+valid parse in 7.669ms
 ```
 
 # zig compiler support
 The main branch is meant to compile with zig's master branch.  It is tested weekly on linux, windows and macos. 
 
-The zig-0.10.0 branch works with zig's 0.10.0 release.  It is tested on linux only when it is updated.
+The [zig-0.10.0 branch](../../releases/tag/v0.10.0-0) works with zig's 0.10.0 release.  It is tested on linux only when it is updated.
 
 # usage
 ```console

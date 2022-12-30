@@ -118,7 +118,6 @@ const BitIndexer = struct {
     }
 };
 
-
 const Utf8Checker = struct {
     err: Chunk = zeros,
     prev_input_block: Chunk = zeros,
@@ -143,15 +142,19 @@ const Utf8Checker = struct {
             else => unreachable,
         };
     }
+
     const check_special_cases = if (cmn.is_arm64)
-        check_special_cases_fn(1, c.lookup_16_aarch64)
-    else if(cmn.is_x86_64 and cmn.has_avx)
-        check_special_cases_fn(2, c.mm256_shuffle_epi8)
+        CheckSpecialCasesFn(1, c.lookup_16_aarch64)
+    else if (cmn.is_x86_64 and cmn.has_avx)
+        CheckSpecialCasesFn(2, c.mm256_shuffle_epi8)
     else
-        check_special_cases_fn(2, c.shuffle_fallback);
-    const ChunkFn = fn(Chunk, Chunk) Chunk;
+        CheckSpecialCasesFn(2, c.shuffle_fallback);
+
+    const ChunkFnInline = fn (Chunk, Chunk) callconv(.Inline) Chunk;
+    const ChunkFn = fn (Chunk, Chunk) Chunk;
+
     // zig fmt: off
-    fn check_special_cases_fn(comptime N: u8, comptime shuffle: ChunkFn) ChunkFn {
+    fn CheckSpecialCasesFn(comptime N: u8, comptime shuffle: ChunkFnInline) ChunkFn {
         return struct {
             fn func(input: Chunk, prev1: Chunk) Chunk {
                 // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
@@ -311,7 +314,7 @@ const Utf8Checker = struct {
 
     fn check_next_input(checker: *Utf8Checker, input: v.u8x64) void {
         // const NUM_CHUNKS = cmn.STEP_SIZE / 32;
-        
+
         if (is_ascii(input)) {
             // cmn.println("is_ascii checker.prev_incomplete {}", .{checker.prev_incomplete});
             checker.err |= checker.prev_incomplete;
@@ -336,8 +339,7 @@ const Utf8Checker = struct {
                 checker.check_utf8_bytes(chunks[3], chunks[2]);
                 checker.prev_incomplete = is_incomplete(chunks[NUM_CHUNKS - 1]);
                 checker.prev_input_block = chunks[NUM_CHUNKS - 1];
-            }
-            else unreachable;
+            } else unreachable;
         }
     }
     // do not forget to call check_eof!
@@ -450,6 +452,18 @@ const CharacterBlock = struct {
         return .{ .whitespace = whitespace, .op = op };
     }
 
+    const tables: [2][16]u8 = .{
+        .{ 16, 0, 0, 0, 0, 0, 0, 0, 0, 8, 12, 1, 2, 9, 0, 0 },
+        .{ 8, 0, 18, 4, 0, 1, 0, 1, 0, 0, 0, 3, 2, 1, 0, 0 },
+    };
+    const lo_lut = tables[0];
+    const hi_lut = tables[1];
+    const zeros = [1]u8{0} ** 16;
+    const sevens = [1]u8{7} ** 16;
+    const wsmask = [1]u8{0x18} ** 16;
+    const lo = [1]u8{0xf} ** 16;
+    const fours = [1]u3{4} ** 16;
+
     pub fn classify_arm64(input_vec: v.u8x64) CharacterBlock {
         // Functional programming causes trouble with Visual Studio.
         // Keeping this version in comments since it is much nicer:
@@ -465,21 +479,12 @@ const CharacterBlock = struct {
         const chunk1: v.u8x16 = in[16..32].*;
         const chunk2: v.u8x16 = in[32..48].*;
         const chunk3: v.u8x16 = in[48..].*;
-        const lo = @splat(16, @as(u8, 0xf));
-        const fours = @splat(16, @as(u3, 4));
 
-        const tables: [2]v.u8x16 = .{
-            .{ 16, 0, 0, 0, 0, 0, 0, 0, 0, 8, 12, 1, 2, 9, 0, 0 },
-            .{ 8, 0, 18, 4, 0, 1, 0, 1, 0, 0, 0, 3, 2, 1, 0, 0 },
-        };
-        const table1 = tables[0];
-        const table2 = tables[1];
-        
         const vv: v.u8x64 =
-            @as([16]u8, c.lookup_16_aarch64(table1, chunk0 & lo) & c.lookup_16_aarch64(table2, chunk0 >> fours)) ++
-            @as([16]u8, c.lookup_16_aarch64(table1, chunk1 & lo) & c.lookup_16_aarch64(table2, chunk1 >> fours)) ++
-            @as([16]u8, c.lookup_16_aarch64(table1, chunk2 & lo) & c.lookup_16_aarch64(table2, chunk2 >> fours)) ++
-            @as([16]u8, c.lookup_16_aarch64(table1, chunk3 & lo) & c.lookup_16_aarch64(table2, chunk3 >> fours));
+            @as([16]u8, c.lookup_16_aarch64(lo_lut, chunk0 & lo) & c.lookup_16_aarch64(hi_lut, chunk0 >> fours)) ++
+            @as([16]u8, c.lookup_16_aarch64(lo_lut, chunk1 & lo) & c.lookup_16_aarch64(hi_lut, chunk1 >> fours)) ++
+            @as([16]u8, c.lookup_16_aarch64(lo_lut, chunk2 & lo) & c.lookup_16_aarch64(hi_lut, chunk2 >> fours)) ++
+            @as([16]u8, c.lookup_16_aarch64(lo_lut, chunk3 & lo) & c.lookup_16_aarch64(hi_lut, chunk3 >> fours));
 
         // cmn.println("vv {}", .{vv});
         // We compute whitespace and op separately. If the code later only use one or the
@@ -497,27 +502,24 @@ const CharacterBlock = struct {
         // just for minification (or just to identify the structural characters),
         // there is a small untaken optimization opportunity here. We deliberately
         // do not pick it up.
-        
+
         const vchunks = @bitCast([64]u8, vv);
         const vchunk0: v.u8x16 = vchunks[0..16].*;
         const vchunk1: v.u8x16 = vchunks[16..32].*;
         const vchunk2: v.u8x16 = vchunks[32..48].*;
         const vchunk3: v.u8x16 = vchunks[48..].*;
-        const zeros = @splat(16, @as(u8, 0));
-        const sevens = @splat(16, @as(u8, 0x7));
         const ops: [4]u16 = .{
-            @bitCast(u16, c.any_bits_set_aarch64( vchunk0, sevens) != zeros),
-            @bitCast(u16, c.any_bits_set_aarch64( vchunk1, sevens) != zeros),
-            @bitCast(u16, c.any_bits_set_aarch64( vchunk2, sevens) != zeros),
-            @bitCast(u16, c.any_bits_set_aarch64( vchunk3, sevens) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64(vchunk0, sevens) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64(vchunk1, sevens) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64(vchunk2, sevens) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64(vchunk3, sevens) != zeros),
         };
 
-        const ws = @splat(16, @as(u8, 0x18));
         const wss: [4]u16 = .{
-            @bitCast(u16, c.any_bits_set_aarch64( vchunk0, ws) != zeros),
-            @bitCast(u16, c.any_bits_set_aarch64( vchunk1, ws) != zeros),
-            @bitCast(u16, c.any_bits_set_aarch64( vchunk2, ws) != zeros),
-            @bitCast(u16, c.any_bits_set_aarch64( vchunk3, ws) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64(vchunk0, wsmask) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64(vchunk1, wsmask) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64(vchunk2, wsmask) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64(vchunk3, wsmask) != zeros),
         };
         const whitespace = @bitCast(u64, wss);
         const op = @bitCast(u64, ops);
@@ -528,15 +530,38 @@ const CharacterBlock = struct {
     }
 
     pub fn classify_fallback(input_vec: v.u8x64) CharacterBlock {
-        cmn.println("{s} | whitespace", .{@as([64]u8, input_vec)});
-        if(true) unreachable;
-        const u1x64 = @Vector(64, u1);
-        const ops: u1x64 = undefined;
-        const wss: u1x64 = undefined;
+        // if (cmn.debug) {
+        //     var buf: [64]u8 = input_vec;
+        //     for (buf) |*x| {
+        //         if (x.* == '\n') x.* = '-';
+        //     }
+        //     cmn.println("{s}", .{buf});
+        // }
+        const in = @bitCast([64]u8, input_vec);
+        const chunk0: v.u8x32 = in[0..32].*;
+        const chunk1: v.u8x32 = in[32..].*;
+
+        const vv: v.u8x64 =
+            @as([32]u8, c.shuffle_fallback(lo_lut ** 2, chunk0 & lo ** 2) & c.shuffle_fallback(hi_lut ** 2, chunk0 >> fours ** 2)) ++
+            @as([32]u8, c.shuffle_fallback(lo_lut ** 2, chunk1 & lo ** 2) & c.shuffle_fallback(hi_lut ** 2, chunk1 >> fours ** 2));
+
+        const vchunks = @bitCast([64]u8, vv);
+        const vchunk0: v.u8x32 = vchunks[0..32].*;
+        const vchunk1: v.u8x32 = vchunks[32..].*;
+        
+        const ops: [2]u32 = .{
+            @bitCast(u32, vchunk0 & sevens ** 2 != zeros ** 2),
+            @bitCast(u32, vchunk1 & sevens ** 2 != zeros ** 2),
+        };
+        const wss: [2]u32 = .{
+            @bitCast(u32, vchunk0 & wsmask ** 2 != zeros ** 2),
+            @bitCast(u32, vchunk1 & wsmask ** 2 != zeros ** 2),
+        };
         const whitespace = @bitCast(u64, wss);
-        const op = @bitCast(u64, ops);
         // cmn.println("{b:0>64} | whitespace", .{@bitReverse(whitespace)});
+        const op = @bitCast(u64, ops);
         // cmn.println("{b:0>64} | op", .{@bitReverse(op)});
+
         return .{ .whitespace = whitespace, .op = op };
     }
 
@@ -598,10 +623,6 @@ pub const StructuralIndexer = struct {
             CharacterBlock.classify_arm64(input_vec)
         else
             CharacterBlock.classify_fallback(input_vec);
-            // @compileError(std.fmt.comptimePrint(
-            //     "TODO provide fallback CharacterBlock.classify() for arch {s} with has_avx={}",
-            //     .{@tagName(builtin.cpu.arch), cmn.has_avx},
-            // ));
 
         // The term "scalar" refers to anything except structural characters and white space
         // (so letters, numbers, quotes).
