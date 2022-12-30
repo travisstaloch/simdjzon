@@ -143,202 +143,114 @@ const Utf8Checker = struct {
             else => unreachable,
         };
     }
-    const check_special_cases = if (cmn.is_arm64) check_special_cases_arm64 else check_special_cases_x86;
+    const check_special_cases = if (cmn.is_arm64)
+        check_special_cases_fn(1, c.lookup_16_aarch64)
+    else if(cmn.is_x86_64 and cmn.has_avx)
+        check_special_cases_fn(2, c.mm256_shuffle_epi8)
+    else
+        check_special_cases_fn(2, c.shuffle_fallback);
+    const ChunkFn = fn(Chunk, Chunk) Chunk;
     // zig fmt: off
-    fn check_special_cases_x86(input: Chunk, prev1: Chunk) Chunk {
-        // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
-        // Bit 1 = Too Long (ASCII followed by continuation)
-        // Bit 2 = Overlong 3-byte
-        // Bit 4 = Surrogate
-        // Bit 5 = Overlong 2-byte
-        // Bit 7 = Two Continuations
-        const TOO_SHORT: u8 = 1 << 0;   // 11______ 0_______
-                                        // 11______ 11______
-        const TOO_LONG: u8 = 1 << 1;    // 0_______ 10______
-        const OVERLONG_3: u8 = 1 << 2;  // 11100000 100_____
-        const SURROGATE: u8 = 1 << 4;   // 11101101 101_____
-        const OVERLONG_2: u8 = 1 << 5;  // 1100000_ 10______
-        const TWO_CONTS: u8 = 1 << 7;   // 10______ 10______
-        const TOO_LARGE: u8 = 1 << 3;   // 11110100 1001____
-                                        // 11110100 101_____
-                                        // 11110101 1001____
-                                        // 11110101 101_____
-                                        // 1111011_ 1001____
-                                        // 1111011_ 101_____
-                                        // 11111___ 1001____
-                                        // 11111___ 101_____
-        const TOO_LARGE_1000: u8 = 1 << 6;
-                                        // 11110101 1000____
-                                        // 1111011_ 1000____
-                                        // 11111___ 1000____
-        const OVERLONG_4: u8 = 1 << 6;  // 11110000 1000____
+    fn check_special_cases_fn(comptime N: u8, comptime shuffle: ChunkFn) ChunkFn {
+        return struct {
+            fn func(input: Chunk, prev1: Chunk) Chunk {
+                // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
+                // Bit 1 = Too Long (ASCII followed by continuation)
+                // Bit 2 = Overlong 3-byte
+                // Bit 4 = Surrogate
+                // Bit 5 = Overlong 2-byte
+                // Bit 7 = Two Continuations
+                const TOO_SHORT: u8 = 1 << 0;   // 11______ 0_______
+                                                // 11______ 11______
+                const TOO_LONG: u8 = 1 << 1;    // 0_______ 10______
+                const OVERLONG_3: u8 = 1 << 2;  // 11100000 100_____
+                const SURROGATE: u8 = 1 << 4;   // 11101101 101_____
+                const OVERLONG_2: u8 = 1 << 5;  // 1100000_ 10______
+                const TWO_CONTS: u8 = 1 << 7;   // 10______ 10______
+                const TOO_LARGE: u8 = 1 << 3;   // 11110100 1001____
+                                                // 11110100 101_____
+                                                // 11110101 1001____
+                                                // 11110101 101_____
+                                                // 1111011_ 1001____
+                                                // 1111011_ 101_____
+                                                // 11111___ 1001____
+                                                // 11111___ 101_____
+                const TOO_LARGE_1000: u8 = 1 << 6;
+                                                // 11110101 1000____
+                                                // 1111011_ 1000____
+                                                // 11111___ 1000____
+                const OVERLONG_4: u8 = 1 << 6;  // 11110000 1000____
 
-        const byte_1_high_0 = prev1 >> @splat(32, @as(u3, 4));
-        const tbl1 = [16]u8{
-            // 0_______ ________ <ASCII in byte 1>
-            TOO_LONG,               TOO_LONG,  TOO_LONG,                           TOO_LONG,
-            TOO_LONG,               TOO_LONG,  TOO_LONG,                           TOO_LONG,
-            // 10______ ________ <continuation in byte 1>
-            TWO_CONTS,              TWO_CONTS, TWO_CONTS,                          TWO_CONTS,
-            // 1100____ ________ <two byte lead in byte 1>
-            TOO_SHORT | OVERLONG_2,
-            // 1101____ ________ <two byte lead in byte 1>
-            TOO_SHORT,
-            // 1110____ ________ <three byte lead in byte 1>
-            TOO_SHORT | OVERLONG_3 | SURROGATE,
-            // 1111____ ________ <four+ byte lead in byte 1>
-            TOO_SHORT | TOO_LARGE | TOO_LARGE_1000 | OVERLONG_4,
-        } ** 2;
-        const byte_1_high = c.mm256_shuffle_epi8(tbl1, byte_1_high_0);
-        const CARRY: u8 = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
-        const byte_1_low0 = prev1 & @splat(32, @as(u8, 0x0F));
-        
-        const tbl2 = [16]u8{
-            // ____0000 ________
-            CARRY | OVERLONG_3 | OVERLONG_2 | OVERLONG_4,
-            // ____0001 ________
-            CARRY | OVERLONG_2,
-            // ____001_ ________
-            CARRY,
-            CARRY,
-            
-            // ____0100 ________
-            CARRY | TOO_LARGE,
-            // ____0101 ________
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
-            // ____011_ ________
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
+                const byte_1_high_0 = prev1 >> @splat(chunk_len, @as(u3, 4));
+                const tbl1 = [16]u8{
+                    // 0_______ ________ <ASCII in byte 1>
+                    TOO_LONG,               TOO_LONG,  TOO_LONG,                           TOO_LONG,
+                    TOO_LONG,               TOO_LONG,  TOO_LONG,                           TOO_LONG,
+                    // 10______ ________ <continuation in byte 1>
+                    TWO_CONTS,              TWO_CONTS, TWO_CONTS,                          TWO_CONTS,
+                    // 1100____ ________ <two byte lead in byte 1>
+                    TOO_SHORT | OVERLONG_2,
+                    // 1101____ ________ <two byte lead in byte 1>
+                    TOO_SHORT,
+                    // 1110____ ________ <three byte lead in byte 1>
+                    TOO_SHORT | OVERLONG_3 | SURROGATE,
+                    // 1111____ ________ <four+ byte lead in byte 1>
+                    TOO_SHORT | TOO_LARGE | TOO_LARGE_1000 | OVERLONG_4,
+                } ** N;
+                const byte_1_high = shuffle(tbl1, byte_1_high_0);
+                const CARRY: u8 = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
+                const byte_1_low0 = prev1 & @splat(chunk_len, @as(u8, 0x0F));
 
-            // ____1___ ________
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
-            // ____1101 ________
-            CARRY | TOO_LARGE | TOO_LARGE_1000 | SURROGATE,
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
-        } ** 2;
-        const byte_1_low = c.mm256_shuffle_epi8(tbl2, byte_1_low0);
+                const tbl2 = [16]u8{
+                    // ____0000 ________
+                    CARRY | OVERLONG_3 | OVERLONG_2 | OVERLONG_4,
+                    // ____0001 ________
+                    CARRY | OVERLONG_2,
+                    // ____001_ ________
+                    CARRY,
+                    CARRY,
 
-        const byte_2_high_0 = input >> @splat(32, @as(u3, 4));
-        const tbl3 = [16]u8{
-            // ________ 0_______ <ASCII in byte 2>
-            TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
-            TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
-            // ________ 1000____
-            TOO_LONG | OVERLONG_2 | TWO_CONTS | OVERLONG_3 | TOO_LARGE_1000 | OVERLONG_4,
-            // ________ 1001____
-            TOO_LONG | OVERLONG_2 | TWO_CONTS | OVERLONG_3 | TOO_LARGE,
-            // ________ 101_____
-            TOO_LONG | OVERLONG_2 | TWO_CONTS | SURROGATE | TOO_LARGE, TOO_LONG | OVERLONG_2 | TWO_CONTS | SURROGATE | TOO_LARGE,
-            // ________ 11______
-            TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
-        } ** 2;
-        const byte_2_high = c.mm256_shuffle_epi8(tbl3, byte_2_high_0);
-        return (byte_1_high & byte_1_low & byte_2_high);
+                    // ____0100 ________
+                    CARRY | TOO_LARGE,
+                    // ____0101 ________
+                    CARRY | TOO_LARGE | TOO_LARGE_1000,
+                    // ____011_ ________
+                    CARRY | TOO_LARGE | TOO_LARGE_1000,
+                    CARRY | TOO_LARGE | TOO_LARGE_1000,
+
+                    // ____1___ ________
+                    CARRY | TOO_LARGE | TOO_LARGE_1000,
+                    CARRY | TOO_LARGE | TOO_LARGE_1000,
+                    CARRY | TOO_LARGE | TOO_LARGE_1000,
+                    CARRY | TOO_LARGE | TOO_LARGE_1000,
+                    CARRY | TOO_LARGE | TOO_LARGE_1000,
+                    // ____1101 ________
+                    CARRY | TOO_LARGE | TOO_LARGE_1000 | SURROGATE,
+                    CARRY | TOO_LARGE | TOO_LARGE_1000,
+                    CARRY | TOO_LARGE | TOO_LARGE_1000,
+                } ** N;
+                const byte_1_low = shuffle(tbl2, byte_1_low0);
+
+                const byte_2_high_0 = input >> @splat(chunk_len, @as(u3, 4));
+                const tbl3 = [16]u8{
+                    // ________ 0_______ <ASCII in byte 2>
+                    TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
+                    TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
+                    // ________ 1000____
+                    TOO_LONG | OVERLONG_2 | TWO_CONTS | OVERLONG_3 | TOO_LARGE_1000 | OVERLONG_4,
+                    // ________ 1001____
+                    TOO_LONG | OVERLONG_2 | TWO_CONTS | OVERLONG_3 | TOO_LARGE,
+                    // ________ 101_____
+                    TOO_LONG | OVERLONG_2 | TWO_CONTS | SURROGATE | TOO_LARGE, TOO_LONG | OVERLONG_2 | TWO_CONTS | SURROGATE | TOO_LARGE,
+                    // ________ 11______
+                    TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
+                } ** N;
+                const byte_2_high = shuffle(tbl3, byte_2_high_0);
+                return (byte_1_high & byte_1_low & byte_2_high);
+            }
+        }.func;
     }
-    
-    fn check_special_cases_arm64(input: Chunk, prev1: Chunk) Chunk {
-        // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
-        // Bit 1 = Too Long (ASCII followed by continuation)
-        // Bit 2 = Overlong 3-byte
-        // Bit 4 = Surrogate
-        // Bit 5 = Overlong 2-byte
-        // Bit 7 = Two Continuations
-     
-        const TOO_SHORT: u8 = 1 << 0;   // 11______ 0_______
-                                        // 11______ 11______
-        const TOO_LONG: u8 = 1 << 1;    // 0_______ 10______
-        const OVERLONG_3: u8 = 1 << 2;  // 11100000 100_____
-        const SURROGATE: u8 = 1 << 4;   // 11101101 101_____
-        const OVERLONG_2: u8 = 1 << 5;  // 1100000_ 10______
-        const TWO_CONTS: u8 = 1 << 7;   // 10______ 10______
-        const TOO_LARGE: u8 = 1 << 3;   // 11110100 1001____
-                                        // 11110100 101_____
-                                        // 11110101 1001____
-                                        // 11110101 101_____
-                                        // 1111011_ 1001____
-                                        // 1111011_ 101_____
-                                        // 11111___ 1001____
-                                        // 11111___ 101_____
-        const TOO_LARGE_1000: u8 = 1 << 6;
-                                        // 11110101 1000____
-                                        // 1111011_ 1000____
-                                        // 11111___ 1000____
-        const OVERLONG_4: u8 = 1 << 6;  // 11110000 1000____
 
-        const byte_1_high_0 = prev1 >> @splat(chunk_len, @as(u3, 4));
-        const tbl1 = [16]u8{
-            // 0_______ ________ <ASCII in byte 1>
-            TOO_LONG,               TOO_LONG,  TOO_LONG,                           TOO_LONG,
-            TOO_LONG,               TOO_LONG,  TOO_LONG,                           TOO_LONG,
-            // 10______ ________ <continuation in byte 1>
-            TWO_CONTS,              TWO_CONTS, TWO_CONTS,                          TWO_CONTS,
-            // 1100____ ________ <two byte lead in byte 1>
-            TOO_SHORT | OVERLONG_2,
-            // 1101____ ________ <two byte lead in byte 1>
-            TOO_SHORT,
-            // 1110____ ________ <three byte lead in byte 1>
-            TOO_SHORT | OVERLONG_3 | SURROGATE,
-            // 1111____ ________ <four+ byte lead in byte 1>
-            TOO_SHORT | TOO_LARGE | TOO_LARGE_1000 | OVERLONG_4,
-        };
-
-        const byte_1_high = c.lookup_16_aarch64(byte_1_high_0, tbl1); 
-        const CARRY: u8 = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
-        const byte_1_low0 = prev1 & @splat(chunk_len, @as(u8, 0x0F));
-        
-        const tbl2 = [16]u8{
-            // ____0000 ________
-            CARRY | OVERLONG_3 | OVERLONG_2 | OVERLONG_4,
-            // ____0001 ________
-            CARRY | OVERLONG_2,
-            // ____001_ ________
-            CARRY,
-            CARRY,
-            
-            // ____0100 ________
-            CARRY | TOO_LARGE,
-            // ____0101 ________
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
-            // ____011_ ________
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
-
-            // ____1___ ________
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
-            // ____1101 ________
-            CARRY | TOO_LARGE | TOO_LARGE_1000 | SURROGATE,
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
-            CARRY | TOO_LARGE | TOO_LARGE_1000,
-        };
-        // const byte_1_low = c.mm256_shuffle_epi8(tbl2, byte_1_low0);
-        const byte_1_low = c.lookup_16_aarch64(byte_1_low0, tbl2);
-
-        const byte_2_high_0 = input >> @splat(chunk_len, @as(u3, 4));
-        const tbl3 = [16]u8{
-            // ________ 0_______ <ASCII in byte 2>
-            TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
-            TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
-            // ________ 1000____
-            TOO_LONG | OVERLONG_2 | TWO_CONTS | OVERLONG_3 | TOO_LARGE_1000 | OVERLONG_4,
-            // ________ 1001____
-            TOO_LONG | OVERLONG_2 | TWO_CONTS | OVERLONG_3 | TOO_LARGE,
-            // ________ 101_____
-            TOO_LONG | OVERLONG_2 | TWO_CONTS | SURROGATE | TOO_LARGE, TOO_LONG | OVERLONG_2 | TWO_CONTS | SURROGATE | TOO_LARGE,
-            // ________ 11______
-            TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
-        };
-        const byte_2_high = c.lookup_16_aarch64(byte_2_high_0, tbl3);
-        return (byte_1_high & byte_1_low & byte_2_high);
-    }
     // zig fmt: on
 
     fn check_multibyte_lengths(input: Chunk, prev_input: Chunk, sc: Chunk) Chunk {
@@ -564,10 +476,10 @@ const CharacterBlock = struct {
         const table2 = tables[1];
         
         const vv: v.u8x64 =
-            @as([16]u8, c.lookup_16_aarch64(chunk0 & lo, table1) & c.lookup_16_aarch64(chunk0 >> fours, table2)) ++
-            @as([16]u8, c.lookup_16_aarch64(chunk1 & lo, table1) & c.lookup_16_aarch64(chunk1 >> fours, table2)) ++
-            @as([16]u8, c.lookup_16_aarch64(chunk2 & lo, table1) & c.lookup_16_aarch64(chunk2 >> fours, table2)) ++
-            @as([16]u8, c.lookup_16_aarch64(chunk3 & lo, table1) & c.lookup_16_aarch64(chunk3 >> fours, table2));
+            @as([16]u8, c.lookup_16_aarch64(table1, chunk0 & lo) & c.lookup_16_aarch64(table2, chunk0 >> fours)) ++
+            @as([16]u8, c.lookup_16_aarch64(table1, chunk1 & lo) & c.lookup_16_aarch64(table2, chunk1 >> fours)) ++
+            @as([16]u8, c.lookup_16_aarch64(table1, chunk2 & lo) & c.lookup_16_aarch64(table2, chunk2 >> fours)) ++
+            @as([16]u8, c.lookup_16_aarch64(table1, chunk3 & lo) & c.lookup_16_aarch64(table2, chunk3 >> fours));
 
         // cmn.println("vv {}", .{vv});
         // We compute whitespace and op separately. If the code later only use one or the
@@ -612,6 +524,19 @@ const CharacterBlock = struct {
         // cmn.println("{b:0>64} | whitespace", .{@bitReverse(whitespace)});
         // cmn.println("{b:0>64} | op", .{@bitReverse(op)});
 
+        return .{ .whitespace = whitespace, .op = op };
+    }
+
+    pub fn classify_fallback(input_vec: v.u8x64) CharacterBlock {
+        cmn.println("{s} | whitespace", .{@as([64]u8, input_vec)});
+        if(true) unreachable;
+        const u1x64 = @Vector(64, u1);
+        const ops: u1x64 = undefined;
+        const wss: u1x64 = undefined;
+        const whitespace = @bitCast(u64, wss);
+        const op = @bitCast(u64, ops);
+        // cmn.println("{b:0>64} | whitespace", .{@bitReverse(whitespace)});
+        // cmn.println("{b:0>64} | op", .{@bitReverse(op)});
         return .{ .whitespace = whitespace, .op = op };
     }
 
@@ -672,10 +597,11 @@ pub const StructuralIndexer = struct {
         else if (cmn.is_arm64)
             CharacterBlock.classify_arm64(input_vec)
         else
-            @compileError(std.fmt.comptimePrint(
-                "TODO provide fallback CharacterBlock.classify() for arch {s} with has_avx={}", 
-                .{@tagName(builtin.cpu.arch), cmn.has_avx},
-            ));
+            CharacterBlock.classify_fallback(input_vec);
+            // @compileError(std.fmt.comptimePrint(
+            //     "TODO provide fallback CharacterBlock.classify() for arch {s} with has_avx={}",
+            //     .{@tagName(builtin.cpu.arch), cmn.has_avx},
+            // ));
 
         // The term "scalar" refers to anything except structural characters and white space
         // (so letters, numbers, quotes).
@@ -1351,6 +1277,7 @@ pub const Parser = struct {
             .open_containers = std.MultiArrayList(OpenContainerInfo){},
             .max_depth = options.max_depth,
         };
+        errdefer parser.deinit();
         parser.input_len = try parser.read_file(filename);
         const capacity = parser.input_len;
         try parser.doc.allocate(allocator, capacity);
@@ -1508,6 +1435,7 @@ pub const Parser = struct {
     }
 
     pub fn parse(parser: *Parser) !void {
+        errdefer parser.deinit();
         try parser.stage1();
         return parser.stage2();
     }

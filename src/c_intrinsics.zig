@@ -61,6 +61,12 @@ pub fn _prev3(a: Chunk, b: Chunk) Chunk {
 // --- end from https://gist.github.com/sharpobject/80dc1b6f3aaeeada8c0e3a04ebc4b60a
 // ---
 
+pub fn shuffle_fallback(x: v.u8x32, mask: v.u8x32) v.u8x32 {
+    _ = x;
+    _ = mask;
+    unreachable;
+}
+
 pub fn mm256_shuffle_epi8(x: v.u8x32, mask: v.u8x32) v.u8x32 {
     return asm (
         \\ vpshufb %[mask], %[x], %[out]
@@ -74,7 +80,7 @@ pub fn mm256_shuffle_epi8(x: v.u8x32, mask: v.u8x32) v.u8x32 {
 pub fn lookup_16_aarch64(x: v.u8x16, mask: v.u8x16) v.u8x16 {
     // tbl     v0.16b, { v0.16b }, v1.16b
     return asm (
-        \\tbl  %[out].16b, {%[mask].16b}, %[x].16b
+        \\tbl  %[out].16b, {%[x].16b}, %[mask].16b
         : [out] "=&x" (-> v.u8x16),
         : [x] "x" (x),
           [mask] "x" (mask),
