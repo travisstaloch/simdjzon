@@ -9,70 +9,53 @@ const ondemand = simdjzon.ondemand;
 pub const step_size = if (build_options.step_128) 128 else 64;
 pub const read_buf_cap = build_options.ondemand_read_cap;
 
-pub fn domMain() !u8 {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    const args = try std.process.argsAlloc(allocator);
+const Args = struct {
+    verbose: bool = false,
+    filename: []const u8 = "",
+};
+
+pub fn domMain(allocator: std.mem.Allocator, args: Args) !u8 {
     var parser: dom.Parser = undefined;
 
-    if (args.len == 1) {
+    if (args.filename.len == 0) {
         var stdin = std.io.getStdIn().reader();
         const input = try stdin.readAllAlloc(allocator, std.math.maxInt(u32));
         parser = try dom.Parser.initFixedBuffer(allocator, input, .{});
-    } else if (args.len == 2) {
-        const filename = std.mem.span(args[1]);
-        parser = try dom.Parser.initFile(allocator, filename, .{});
     } else {
-        std.log.err("Too many arguments.  Please provide input via filename or stdin", .{});
-        return 1;
+        parser = try dom.Parser.initFile(allocator, args.filename, .{});
     }
-
     defer parser.deinit();
+
     parser.parse() catch |err| switch (err) {
-        // error.EndOfStream => {},
         else => {
             std.log.err("parse failed. {s}", .{@errorName(err)});
             return 1;
         },
     };
-    std.log.debug("parse valid", .{});
+
     return 0;
 }
 
-pub fn ondemandMain() !u8 {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    // const allocator = std.heap.c_allocator;
-    const args = try std.process.argsAlloc(allocator);
+pub fn ondemandMain(allocator: std.mem.Allocator, args: Args) !u8 {
     var parser: ondemand.Parser = undefined;
     defer if (parser.src.* == .file) parser.src.file.close();
 
-    if (args.len == 1) {
+    if (args.filename.len == 0) {
         var stdin = std.io.getStdIn().reader();
         const input = try stdin.readAllAlloc(allocator, std.math.maxInt(u32));
         var src = std.io.StreamSource{ .buffer = std.io.fixedBufferStream(input) };
         parser = try ondemand.Parser.init(&src, allocator, "<stdin>", .{});
-    } else if (args.len == 2) {
-        const filepath = std.mem.span(args[1]);
-        const file = try std.fs.cwd().openFile(filepath, .{ .mode = .read_only});
-
-        var src = std.io.StreamSource{ .file = file };
-        parser = try ondemand.Parser.init(&src, allocator, filepath, .{});
     } else {
-        std.log.err("Too many arguments.  Please provide input via filename or stdin", .{});
-        return 1;
+        const file = try std.fs.cwd().openFile(args.filename, .{ .mode = .read_only });
+        var src = std.io.StreamSource{ .file = file };
+        parser = try ondemand.Parser.init(&src, allocator, args.filename, .{});
     }
-
     defer parser.deinit();
 
     var doc = try parser.iterate();
-    // common.debug = true;
     var string_buf: [0x1000]u8 = undefined;
     var end_index: u32 = 0;
-    recursive_iterate_json(&doc, 1, parser.parser.max_depth, &string_buf, &end_index) catch |err| switch (err) {
-        // error.EndOfStream => {},
+    recursive_iterate_json(&doc, .doc, 1, parser.parser.max_depth, &string_buf, &end_index) catch |err| switch (err) {
         else => {
             std.log.err("{s}:{} parse failed. {s}", .{ parser.parser.filename, end_index, @errorName(err) });
             return 1;
@@ -83,23 +66,22 @@ pub fn ondemandMain() !u8 {
         std.log.err("More than one JSON value at the root of the document, or extra characters at the end of the JSON!", .{});
         return 1;
     }
-    std.log.debug("parse valid", .{});
     return 0;
 }
 
-inline fn recursive_iterate_json(element: anytype, depth: u16, max_depth: u16, string_buf: []u8, end_index: *u32) common.Error!void {
+fn recursive_iterate_json(element_: anytype, comptime ele_type: enum { doc, value }, depth: u16, max_depth: u16, string_buf: []u8, end_index: *u32) common.Error!void {
     if (depth >= max_depth) return error.DEPTH_ERROR;
-    var iter = switch (@TypeOf(element)) {
-        *ondemand.Document => element.iter,
-        *ondemand.Value => element.iter.iter,
-        else => unreachable,
+    var iter = switch (ele_type) {
+        .doc => element_.iter,
+        .value => element_.iter.iter,
     };
+    var element = element_.*;
     switch (try element.get_type()) {
         .array => {
             var arr = try element.get_array();
             var it = arr.iterator();
             while (try it.next()) |*child| {
-                try recursive_iterate_json(child, depth + 1, max_depth, string_buf, end_index);
+                try recursive_iterate_json(child, .value, depth + 1, max_depth, string_buf, end_index);
             }
             end_index.* = (it.iter.iter.token.index - 1)[0];
             return;
@@ -109,7 +91,7 @@ inline fn recursive_iterate_json(element: anytype, depth: u16, max_depth: u16, s
             var it = obj.iterator();
             var key: [0x1000]u8 = undefined;
             while (try it.next(&key)) |*field| {
-                try recursive_iterate_json(&field.value, depth + 1, max_depth, string_buf, end_index);
+                try recursive_iterate_json(&field.value, .value, depth + 1, max_depth, string_buf, end_index);
             }
             end_index.* = (it.iter.iter.token.index - 1)[0];
             return;
@@ -138,9 +120,48 @@ inline fn recursive_iterate_json(element: anytype, depth: u16, max_depth: u16, s
     return;
 }
 
+fn usage(exename: []const u8) void {
+    std.debug.print(
+        \\usage: {s} <?options> <jsonfilename> <?options>
+        \\  options: -v --verbose : prints 'valid parse in <time>'
+        \\
+    , .{exename});
+}
+
 pub fn main() !u8 {
-    return if (build_options.ondemand)
-        ondemandMain()
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const stdout = std.io.getStdOut().writer();
+    var args = try std.process.argsAlloc(allocator);
+    const exename = args[0];
+    args = args[1..];
+    var aargs: Args = .{};
+    while (args.len > 0) : (args = args[1..]) {
+        if (std.mem.eql(u8, args[0], "-v") or std.mem.eql(u8, args[0], "--verbose")) {
+            aargs.verbose = true;
+            continue;
+        }
+        if (aargs.filename.len == 0)
+            aargs.filename = std.mem.span(args[0])
+        else {
+            usage(exename);
+            return 1;
+        }
+    }
+
+    var timer: std.time.Timer = if (aargs.verbose)
+        try std.time.Timer.start()
     else
-        domMain();
+        undefined;
+
+    const result = if (build_options.ondemand)
+        ondemandMain(allocator, aargs)
+    else
+        domMain(allocator, aargs);
+    const diderr = if (result) |_| false else |_| true;
+    if (aargs.verbose and !diderr)
+        try stdout.print("valid parse in {}\n", .{std.fmt.fmtDuration(timer.lap())});
+
+    return result;
 }
