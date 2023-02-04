@@ -143,7 +143,7 @@ pub fn main() !u8 {
             continue;
         }
         if (aargs.filename.len == 0)
-            aargs.filename = std.mem.span(args[0])
+            aargs.filename = std.mem.sliceTo(args[0], 0)
         else {
             usage(exename);
             return 1;
