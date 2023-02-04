@@ -1,15 +1,7 @@
 const std = @import("std");
 
-fn setup(step: *std.build.LibExeObjStep, mode: std.builtin.Mode, target: anytype, options: *std.build.OptionsStep) void {
-    step.setTarget(target);
-    step.setBuildMode(mode);
-    step.addOptions("build_options", options);
-}
-
 pub fn build(b: *std.build.Builder) void {
-    // Standard release options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
-    const mode = b.standardReleaseOptions();
+    const optimize = b.standardOptimizeOption(.{});
     const target = b.standardTargetOptions(.{});
 
     const step_128 = b.option(
@@ -35,19 +27,33 @@ pub fn build(b: *std.build.Builder) void {
     options.addOption(bool, "ondemand", ondemand);
     options.addOption(u16, "ondemand_read_cap", ondemand_read_cap);
 
-    const lib = b.addStaticLibrary("simdjzon", "src/simdjzon.zig");
-    setup(lib, mode, target, options);
+    const lib = b.addStaticLibrary(.{
+        .name = "simdjzon",
+        .root_source_file = .{ .path = "src/simdjzon.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    lib.addOptions("build_options", options);
     lib.install();
 
-    var main_tests = b.addTest("src/tests.zig");
-    setup(main_tests, mode, target, options);
+    var main_tests = b.addTest(.{
+        .root_source_file = .{ .path = "src/tests.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    main_tests.addOptions("build_options", options);
     // main_tests.setFilter("tape build 1");
 
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&main_tests.step);
 
-    const exe = b.addExecutable("simdjzon", "src/main.zig");
-    setup(exe, mode, target, options);
+    const exe = b.addExecutable(.{
+        .name = "simdjzon",
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.addOptions("build_options", options);
     exe.install();
 
     const run_cmd = exe.run();
