@@ -118,7 +118,6 @@ const BitIndexer = struct {
     }
 };
 
-
 const Utf8Checker = struct {
     err: Chunk = zeros,
     prev_input_block: Chunk = zeros,
@@ -399,7 +398,7 @@ const Utf8Checker = struct {
 
     fn check_next_input(checker: *Utf8Checker, input: v.u8x64) void {
         // const NUM_CHUNKS = cmn.STEP_SIZE / 32;
-        
+
         if (is_ascii(input)) {
             // cmn.println("is_ascii checker.prev_incomplete {}", .{checker.prev_incomplete});
             checker.err |= checker.prev_incomplete;
@@ -424,8 +423,7 @@ const Utf8Checker = struct {
                 checker.check_utf8_bytes(chunks[3], chunks[2]);
                 checker.prev_incomplete = is_incomplete(chunks[NUM_CHUNKS - 1]);
                 checker.prev_input_block = chunks[NUM_CHUNKS - 1];
-            }
-            else unreachable;
+            } else unreachable;
         }
     }
     // do not forget to call check_eof!
@@ -562,7 +560,7 @@ const CharacterBlock = struct {
         };
         const table1 = tables[0];
         const table2 = tables[1];
-        
+
         const vv: v.u8x64 =
             @as([16]u8, c.lookup_16_aarch64(chunk0 & lo, table1) & c.lookup_16_aarch64(chunk0 >> fours, table2)) ++
             @as([16]u8, c.lookup_16_aarch64(chunk1 & lo, table1) & c.lookup_16_aarch64(chunk1 >> fours, table2)) ++
@@ -585,7 +583,7 @@ const CharacterBlock = struct {
         // just for minification (or just to identify the structural characters),
         // there is a small untaken optimization opportunity here. We deliberately
         // do not pick it up.
-        
+
         const vchunks = @bitCast([64]u8, vv);
         const vchunk0: v.u8x16 = vchunks[0..16].*;
         const vchunk1: v.u8x16 = vchunks[16..32].*;
@@ -594,18 +592,18 @@ const CharacterBlock = struct {
         const zeros = @splat(16, @as(u8, 0));
         const sevens = @splat(16, @as(u8, 0x7));
         const ops: [4]u16 = .{
-            @bitCast(u16, c.any_bits_set_aarch64( vchunk0, sevens) != zeros),
-            @bitCast(u16, c.any_bits_set_aarch64( vchunk1, sevens) != zeros),
-            @bitCast(u16, c.any_bits_set_aarch64( vchunk2, sevens) != zeros),
-            @bitCast(u16, c.any_bits_set_aarch64( vchunk3, sevens) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64(vchunk0, sevens) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64(vchunk1, sevens) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64(vchunk2, sevens) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64(vchunk3, sevens) != zeros),
         };
 
         const ws = @splat(16, @as(u8, 0x18));
         const wss: [4]u16 = .{
-            @bitCast(u16, c.any_bits_set_aarch64( vchunk0, ws) != zeros),
-            @bitCast(u16, c.any_bits_set_aarch64( vchunk1, ws) != zeros),
-            @bitCast(u16, c.any_bits_set_aarch64( vchunk2, ws) != zeros),
-            @bitCast(u16, c.any_bits_set_aarch64( vchunk3, ws) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64(vchunk0, ws) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64(vchunk1, ws) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64(vchunk2, ws) != zeros),
+            @bitCast(u16, c.any_bits_set_aarch64(vchunk3, ws) != zeros),
         };
         const whitespace = @bitCast(u64, wss);
         const op = @bitCast(u64, ops);
@@ -673,8 +671,8 @@ pub const StructuralIndexer = struct {
             CharacterBlock.classify_arm64(input_vec)
         else
             @compileError(std.fmt.comptimePrint(
-                "TODO provide fallback CharacterBlock.classify() for arch {s} with has_avx={}", 
-                .{@tagName(builtin.cpu.arch), cmn.has_avx},
+                "TODO provide fallback CharacterBlock.classify() for arch {s} with has_avx={}",
+                .{ @tagName(builtin.cpu.arch), cmn.has_avx },
             ));
 
         // The term "scalar" refers to anything except structural characters and white space
@@ -794,7 +792,7 @@ pub const StructuralIndexer = struct {
         if (cmn.debug) {
             var input: [cmn.STEP_SIZE]u8 = undefined;
             std.mem.copy(u8, &input, &@as([64]u8, input_vec));
-            for (input) |*ch| {
+            for (&input) |*ch| {
                 if (ch.* == '\n') ch.* = '-';
             }
             cmn.println("{s}", .{input});

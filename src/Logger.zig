@@ -81,7 +81,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
                 mem.copy(u8, &log_buf2, ptr[0..len]);
             }
 
-            for (log_buf2) |*c, i| {
+            for (&log_buf2, 0..) |*c, i| {
                 if (!is_ondemand)
                     c.* = printable_char(iter.parser.bytes[ci[0] + i])
                 else
@@ -101,7 +101,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
         }
 
         const end_pos = if (!is_ondemand) iter.parser.bytes.len else iter.parser.end_pos;
-        for (log_buf2) |*c, i| {
+        for (&log_buf2, 0..) |*c, i| {
             if (next_index[0] + i >= end_pos) break;
             // std.log.debug("bytes.len {} next_index[0] {} i {}", .{ iter.parser.bytes.len, next_index[0], i });
             if (!is_ondemand)
