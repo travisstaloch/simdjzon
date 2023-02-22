@@ -121,28 +121,6 @@ test "ondemand at_pointer" {
 }
 ```
 
-## gyro package manager
-### add dependency
-```console
-$ gyro add --src github travisstaloch/simdjzon
-```
-
-### modify
-```zig
-// build.zig
-const deps = @import("deps.zig");
-...
-    deps.pkgs.addAllTo(exe);
-    exe.linkLibC();
-    // add c files / include dir
-    const gyro_src_dir = deps.base_dirs.simdjzon ++ "/src/";
-    exe.addCSourceFile(gyro_src_dir ++ "utils.c", &.{});
-    exe.addIncludeDir(gyro_src_dir);
-```
-### build
-```console
-gyro build
-```
 # performance
 ## parsing/validating twitter.json (630Kb)
 ### simdjson
