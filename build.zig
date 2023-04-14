@@ -34,7 +34,7 @@ pub fn build(b: *std.build.Builder) void {
         .optimize = optimize,
     });
     lib.addOptions("build_options", options);
-    lib.install();
+    b.installArtifact(lib);
 
     var main_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/tests.zig" },
@@ -45,7 +45,9 @@ pub fn build(b: *std.build.Builder) void {
     // main_tests.setFilter("tape build 1");
 
     const test_step = b.step("test", "Run tests");
-    test_step.dependOn(&main_tests.step);
+    const main_tests_run = b.addRunArtifact(main_tests);
+    main_tests_run.has_side_effects = true;
+    test_step.dependOn(&main_tests_run.step);
 
     const exe = b.addExecutable(.{
         .name = "simdjzon",
@@ -54,9 +56,9 @@ pub fn build(b: *std.build.Builder) void {
         .optimize = optimize,
     });
     exe.addOptions("build_options", options);
-    exe.install();
+    b.installArtifact(exe);
 
-    const run_cmd = exe.run();
+    const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args|
         run_cmd.addArgs(args);
