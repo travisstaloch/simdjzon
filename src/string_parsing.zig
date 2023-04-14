@@ -180,9 +180,7 @@ pub inline fn parse_string_alloc(comptime T: type, src_: [*]const u8, allocator:
         if (bs_quote.has_quote_first()) {
             // we encountered quotes first. Move dst to point to quotes and exit
             // std.log.debug("has_quote_first quote_index {} dst.items.len {}", .{ bs_quote.quote_index(), dst.items.len });
-            // return dst + bs_quote.quote_index();
             dst_slice.len += bs_quote.quote_index();
-            dst_slice = try allocator.realloc(dst_slice, dst_slice.len);
             return dst_slice;
         }
         if (bs_quote.has_backslash()) {
