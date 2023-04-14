@@ -296,9 +296,11 @@ test "ondemand get with struct" {
     defer parser.deinit();
     var doc = try parser.iterate();
 
+    var arena = std.heap.ArenaAllocator.init(allr);
+    defer arena.deinit();
+    const a = arena.allocator();
     var s: S = undefined;
-    try doc.get(&s, .{ .allocator = allr });
-    defer allr.free(s.a.b);
+    try doc.get(&s, .{ .allocator = a });
     try testing.expectEqualStrings("b-string", s.a.b);
 }
 
@@ -573,13 +575,14 @@ test "ondemand get struct" {
                 try testing.expectEqual(@as(?u8, null), s.a.f);
                 try testing.expectEqualSlices(u8, &.{ 1, 2, 3 }, &s.a.b);
             }
+            var arena = std.heap.ArenaAllocator.init(allr);
+            defer arena.deinit();
+            const a = arena.allocator();
             {
                 // parse strings or arrays in slices using an allocator
                 const S = struct { a: struct { g: []u8, e: []const u8 } };
                 var s: S = undefined;
-                defer allr.free(s.a.g);
-                defer allr.free(s.a.e);
-                try doc.get(&s, .{ .allocator = allr });
+                try doc.get(&s, .{ .allocator = a });
                 try testing.expectEqualSlices(u8, &.{ 4, 5, 6 }, s.a.g);
                 try testing.expectEqualStrings("e-string", s.a.e);
             }
@@ -592,14 +595,15 @@ test "get_string_alloc" {
         \\"asdf"
     , struct {
         fn func(doc: *ondemand.Document) E!void {
+            var arena = std.heap.ArenaAllocator.init(allr);
+            defer arena.deinit();
+            const a = arena.allocator();
             {
-                const str = try doc.get_string_alloc([]u8, allr);
-                defer allr.free(str);
+                var str = try doc.get_string_alloc([]u8, a);
                 try testing.expectEqualStrings("asdf", str);
             }
             {
-                const str = try doc.get_string_alloc([]const u8, allr);
-                defer allr.free(str);
+                var str = try doc.get_string_alloc([]const u8, a);
                 try testing.expectEqualStrings("asdf", str);
             }
         }

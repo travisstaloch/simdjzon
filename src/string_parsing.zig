@@ -163,6 +163,9 @@ pub inline fn parse_string(src_: [*]const u8, dst_: [*]u8) ?[*]u8 {
 /// allocates and returns an unescaped a string from src, stopping at a final unescaped quote.
 /// e.g., if src points at 'joe"', returns 'joe'.
 /// caller owns the memory.
+/// WARNING: the retuned slice is allocated with leading and trailing quotes included.
+/// but the returned slice bounds don't include the quotes. so it must be adjusted to include
+/// the quotes before it can be properly freed.
 pub inline fn parse_string_alloc(comptime T: type, src_: [*]const u8, allocator: mem.Allocator, str_len: u16) !T {
     var src = src_;
     var dst_slice = try allocator.alloc(u8, str_len);

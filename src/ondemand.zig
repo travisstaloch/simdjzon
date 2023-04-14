@@ -1247,6 +1247,9 @@ pub const Document = struct {
         var it = doc.get_root_value_iterator();
         return it.get_root_string(T, buf);
     }
+    /// WARNING: the retuned string is allocated with leading and trailing quotes included.
+    /// but the returned slice bounds don't include the quotes. so it must be adjusted to include
+    /// the quotes before it can be properly freed.
     pub fn get_string_alloc(doc: *Document, comptime T: type, allocator: mem.Allocator) !T {
         var it = doc.get_root_value_iterator();
         return it.get_root_string_alloc(T, allocator);
@@ -1286,6 +1289,10 @@ pub const Document = struct {
             else => error.INVALID_JSON_POINTER,
         };
     }
+
+    /// WARNING: retuned strings are allocated with leading and trailing quotes included.
+    /// but the returned slice bounds don't include the quotes. so it must be adjusted to include
+    /// the quotes before it can be properly freed.
     pub fn get(doc: *Document, out: anytype, options: GetOptions) !void {
         var x = doc.value();
         return x.get(out, options);
