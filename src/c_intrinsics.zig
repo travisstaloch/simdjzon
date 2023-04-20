@@ -92,124 +92,44 @@ pub fn any_bits_set_aarch64(x: v.u8x16, mask: v.u8x16) v.u8x16 {
 }
 
 pub fn prefix_xor(bitmask: u64) u64 {
-    // There should be no such thing with a processor supporting avx2
-    // but not clmul.
-    // const has_pclmul = comptime std.Target.x86.featureSetHas(builtin.cpu.features, .pclmul);
-    const all_ones = @bitCast(u128, @splat(16, @as(u8, 0xff)));
+    const has_native_carryless_multiply = switch (builtin.cpu.arch) {
+        // There should be no such thing with a processor supporting avx but not clmul.
+        .x86_64 => cmn.has_pclmul and cmn.has_avx,
+        .aarch64 => cmn.has_armaes,
+        else => false,
+    };
+
+    if (!has_native_carryless_multiply) {
+        var z = bitmask;
+        z ^= z << 1;
+        z ^= z << 2;
+        z ^= z << 4;
+        z ^= z << 8;
+        z ^= z << 16;
+        z ^= z << 32;
+        return z;
+    }
+
+    // do a carryless multiply by all 1's
+    // adapted from zig/lib/std/crypto/ghash_polyval.zig
     const x = @bitCast(u128, [2]u64{ bitmask, 0 });
-    const m = clmul(x, all_ones, .lo);
+    const y = @bitCast(u128, @splat(16, @as(u8, 0xff)));
 
-    return @bitCast([2]u64, m)[0];
+    return switch (builtin.cpu.arch) {
+        .x86_64 => asm (
+            \\ vpclmulqdq $0x00, %[x], %[y], %[out]
+            : [out] "=x" (-> @Vector(2, u64)),
+            : [x] "x" (@bitCast(@Vector(2, u64), x)),
+              [y] "x" (@bitCast(@Vector(2, u64), y)),
+        ),
+
+        .aarch64 => asm (
+            \\ pmull %[out].1q, %[x].1d, %[y].1d
+            : [out] "=w" (-> @Vector(2, u64)),
+            : [x] "w" (@bitCast(@Vector(2, u64), x)),
+              [y] "w" (@bitCast(@Vector(2, u64), y)),
+        ),
+
+        else => unreachable,
+    }[0];
 }
-
-const clmul = if (cmn.is_x86_64 and cmn.has_pclmul and cmn.has_avx)
-    clmulPclmul
-else if (cmn.is_arm64 and cmn.has_armaes)
-    clmulPmull
-else
-    clmulSoft;
-
-// ---
-// from zig/lib/std/crypto/ghash_polyval.zig
-// ---
-const Selector = enum { lo, hi, hi_lo };
-// Carryless multiplication of two 64-bit integers for x86_64.
-inline fn clmulPclmul(x: u128, y: u128, comptime half: Selector) u128 {
-    switch (half) {
-        .hi => {
-            const product = asm (
-                \\ vpclmulqdq $0x11, %[x], %[y], %[out]
-                : [out] "=x" (-> @Vector(2, u64)),
-                : [x] "x" (@bitCast(@Vector(2, u64), x)),
-                  [y] "x" (@bitCast(@Vector(2, u64), y)),
-            );
-            return @bitCast(u128, product);
-        },
-        .lo => {
-            const product = asm (
-                \\ vpclmulqdq $0x00, %[x], %[y], %[out]
-                : [out] "=x" (-> @Vector(2, u64)),
-                : [x] "x" (@bitCast(@Vector(2, u64), x)),
-                  [y] "x" (@bitCast(@Vector(2, u64), y)),
-            );
-            return @bitCast(u128, product);
-        },
-        .hi_lo => {
-            const product = asm (
-                \\ vpclmulqdq $0x10, %[x], %[y], %[out]
-                : [out] "=x" (-> @Vector(2, u64)),
-                : [x] "x" (@bitCast(@Vector(2, u64), x)),
-                  [y] "x" (@bitCast(@Vector(2, u64), y)),
-            );
-            return @bitCast(u128, product);
-        },
-    }
-}
-
-// Carryless multiplication of two 64-bit integers for ARM crypto.
-inline fn clmulPmull(x: u128, y: u128, comptime half: Selector) u128 {
-    switch (half) {
-        .hi => {
-            const product = asm (
-                \\ pmull2 %[out].1q, %[x].2d, %[y].2d
-                : [out] "=w" (-> @Vector(2, u64)),
-                : [x] "w" (@bitCast(@Vector(2, u64), x)),
-                  [y] "w" (@bitCast(@Vector(2, u64), y)),
-            );
-            return @bitCast(u128, product);
-        },
-        .lo => {
-            const product = asm (
-                \\ pmull %[out].1q, %[x].1d, %[y].1d
-                : [out] "=w" (-> @Vector(2, u64)),
-                : [x] "w" (@bitCast(@Vector(2, u64), x)),
-                  [y] "w" (@bitCast(@Vector(2, u64), y)),
-            );
-            return @bitCast(u128, product);
-        },
-        .hi_lo => {
-            const product = asm (
-                \\ pmull %[out].1q, %[x].1d, %[y].1d
-                : [out] "=w" (-> @Vector(2, u64)),
-                : [x] "w" (@bitCast(@Vector(2, u64), x >> 64)),
-                  [y] "w" (@bitCast(@Vector(2, u64), y)),
-            );
-            return @bitCast(u128, product);
-        },
-    }
-}
-
-// Software carryless multiplication of two 64-bit integers.
-fn clmulSoft(x_: u128, y_: u128, comptime half: Selector) u128 {
-    const x = @truncate(u64, if (half == .hi or half == .hi_lo) x_ >> 64 else x_);
-    const y = @truncate(u64, if (half == .hi) y_ >> 64 else y_);
-
-    const x0 = x & 0x1111111111111110;
-    const x1 = x & 0x2222222222222220;
-    const x2 = x & 0x4444444444444440;
-    const x3 = x & 0x8888888888888880;
-    const y0 = y & 0x1111111111111111;
-    const y1 = y & 0x2222222222222222;
-    const y2 = y & 0x4444444444444444;
-    const y3 = y & 0x8888888888888888;
-    const z0 = (x0 * @as(u128, y0)) ^ (x1 * @as(u128, y3)) ^ (x2 * @as(u128, y2)) ^ (x3 * @as(u128, y1));
-    const z1 = (x0 * @as(u128, y1)) ^ (x1 * @as(u128, y0)) ^ (x2 * @as(u128, y3)) ^ (x3 * @as(u128, y2));
-    const z2 = (x0 * @as(u128, y2)) ^ (x1 * @as(u128, y1)) ^ (x2 * @as(u128, y0)) ^ (x3 * @as(u128, y3));
-    const z3 = (x0 * @as(u128, y3)) ^ (x1 * @as(u128, y2)) ^ (x2 * @as(u128, y1)) ^ (x3 * @as(u128, y0));
-
-    const x0_mask = @as(u64, 0) -% (x & 1);
-    const x1_mask = @as(u64, 0) -% ((x >> 1) & 1);
-    const x2_mask = @as(u64, 0) -% ((x >> 2) & 1);
-    const x3_mask = @as(u64, 0) -% ((x >> 3) & 1);
-    const extra = (x0_mask & y) ^ (@as(u128, x1_mask & y) << 1) ^
-        (@as(u128, x2_mask & y) << 2) ^ (@as(u128, x3_mask & y) << 3);
-
-    return (z0 & 0x11111111111111111111111111111111) ^
-        (z1 & 0x22222222222222222222222222222222) ^
-        (z2 & 0x44444444444444444444444444444444) ^
-        (z3 & 0x88888888888888888888888888888888) ^ extra;
-}
-
-// ---
-// end from zig/lib/std/crypto/ghash_polyval.zig
-// ---
