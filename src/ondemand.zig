@@ -552,7 +552,7 @@ pub const Iterator = struct {
         }
 
         // Copy to the buffer.
-        @memcpy(tmpbuf, json, max_len);
+        @memcpy(tmpbuf[0..max_len], json[0..max_len]);
         tmpbuf[max_len] = ' ';
         return true;
     }
@@ -803,14 +803,12 @@ pub const ValueIterator = struct {
         vi.iter.abandon();
     }
     pub fn copy_key_with_quotes(key_buf: []u8, key: [*]const u8, key_len: usize) void {
-        mem.copy(u8, key_buf, key[0..std.math.min(key_len + 2, key_buf.len)]);
-        // return key_buf[0 .. key_len + 2];
+        const len = std.math.min(key_len + 2, key_buf.len);
+        @memcpy(key_buf[0..len], key[0..len]);
     }
     fn copy_key_without_quotes(key_buf: []u8, key: [*]const u8, key_len: usize) void {
-        mem.copy(u8, key_buf, key[1..std.math.min(key_len, key_buf.len)]);
-        // const end = string_parsing.parse_string(key + 1, key_buf.ptr);
-        // const len = try cmn.ptr_diff(u8, end.?, key_buf.ptr);
-        // return key_buf[0..len];
+        const len = std.math.min(key_len, key_buf.len);
+        @memcpy(key_buf[0 .. len - 1], key[1..len]);
     }
     fn find_field_raw(vi: *ValueIterator, key: []const u8) !bool {
         // cmn.println("find_field_raw vi.depth {} vi.iter.depth {}", .{ vi.depth, vi.iter.depth });
@@ -1362,7 +1360,7 @@ pub const Parser = struct {
             //     cmn.println("{b:0>64} | in_string", .{@bitReverse(u64, block.strings.in_string)});
             // }
         }
-        std.mem.set(u8, read_buf[bytes_read..], 0x20);
+        @memset(read_buf[bytes_read..], 0x20);
         // std.log.debug("read_buf {d}", .{read_buf});
         try p.parser.indexer.step(read_buf, &p.parser, pos);
         try p.parser.indexer.finish(&p.parser, pos + cmn.STEP_SIZE, pos + bytes_read, cmn.STREAMING);
@@ -1398,7 +1396,7 @@ pub const Parser = struct {
         try parser.src.seekTo(start_pos);
         parser.read_buf_start_pos = start_pos;
         // not sure that 0xaa is the best value here but it does prevent false positives like [nul]
-        @memset(&parser.read_buf, 0xaa, READ_BUF_CAP);
+        @memset(&parser.read_buf, 0xaa);
         parser.read_buf_len = @truncate(u16, try parser.src.read(&parser.read_buf));
         return &parser.read_buf;
     }
