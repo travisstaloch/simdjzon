@@ -791,7 +791,7 @@ pub const StructuralIndexer = struct {
         cmn.println("{b:0>64} | prev_structurals, reader_pos {}", .{ @bitReverse(si.prev_structurals), reader_pos });
         if (cmn.debug) {
             var input: [cmn.STEP_SIZE]u8 = undefined;
-            std.mem.copy(u8, &input, &@as([64]u8, input_vec));
+            @memcpy(input[0..64], &@as([64]u8, input_vec));
             for (&input) |*ch| {
                 if (ch.* == '\n') ch.* = '-';
             }
@@ -1215,7 +1215,7 @@ pub const TapeBuilder = struct {
         // be NULL terminated? It comes at a small cost
 
         // iter.log.line_fmt(iter, "", "on_string_end", "{s}", .{str_start[0..str_len]});
-        @memcpy(tb.current_string_buf_loc, mem.asBytes(&str_len), @sizeOf(u32));
+        @memcpy(tb.current_string_buf_loc[0..@sizeOf(u32)], mem.asBytes(&str_len)[0..@sizeOf(u32)]);
         dst[0] = 0;
         iter.parser.doc.string_buf.len += str_len + 1 + @sizeOf(u32);
         // cmn.println("buf.len {} buf.cap {}", .{ iter.parser.doc.string_buf.len, iter.parser.doc.string_buf_cap });
@@ -1375,12 +1375,12 @@ pub const Parser = struct {
         const max_structures = cmn.ROUNDUP_N(capacity, 64) + 2 + 7;
         const paddedlen = try std.math.add(u32, capacity, cmn.SIMDJSON_PADDING);
         parser.bytes = try parser.allocator.alloc(u8, paddedlen);
-        mem.copy(u8, parser.bytes, input);
+        @memcpy(parser.bytes[0..input.len], input);
 
         // We write spaces in the padded region to avoid having uninitized
         // garbage. If nothing else, garbage getting read might trigger a
         // warning in a memory checking.
-        std.mem.set(u8, parser.bytes[capacity..], ascii_space);
+        @memset(parser.bytes[capacity..], ascii_space);
         try parser.doc.allocate(allocator, capacity);
         try parser.indexer.bit_indexer.tail.ensureTotalCapacity(allocator, max_structures);
         try parser.open_containers.ensureTotalCapacity(allocator, options.max_depth);
@@ -1399,7 +1399,7 @@ pub const Parser = struct {
             // We write spaces in the padded region to avoid having uninitized
             // garbage. If nothing else, garbage getting read might trigger a
             // warning in a memory checking.
-            std.mem.set(u8, parser.bytes[len..], ascii_space);
+            @memset(parser.bytes[len..], ascii_space);
         }
         return len;
     }
@@ -1493,7 +1493,7 @@ pub const Parser = struct {
             // }
         }
         var read_buf = [1]u8{0x20} ** cmn.STEP_SIZE;
-        std.mem.copy(u8, &read_buf, parser.bytes[pos..end_pos]);
+        @memcpy(read_buf[0 .. end_pos - pos], parser.bytes[pos..end_pos]);
         // std.log.debug("read_buf {d}", .{read_buf});
         try parser.indexer.step(read_buf, parser, pos);
         try parser.indexer.finish(parser, pos + cmn.STEP_SIZE, end_pos, cmn.STREAMING);
@@ -1601,7 +1601,7 @@ const Object = struct {
         // if (escape != null) {
         //     // Unescape the key
         //     var unescaped: [0x100]u8 = undefined;
-        //     mem.copy(u8, &unescaped, key);
+        //     @memcpy(&unescaped, key);
         //     while (true) {
         //         switch (unescaped[escape.? + 1]) {
         //             '0' => unescaped.replace(escape, 2, "~"),
@@ -1819,10 +1819,10 @@ const Element = struct {
                         switch (ele.tape.tape_ref_type()) {
                             .STRING => {
                                 const string = ele.get_string() catch unreachable;
+                                const len = std.math.min(string.len, out.len * @sizeOf(C));
                                 @memcpy(
-                                    @ptrCast([*]u8, out.ptr),
-                                    string.ptr,
-                                    std.math.min(string.len, out.len * @sizeOf(C)),
+                                    @ptrCast([*]u8, out.ptr)[0..len],
+                                    string.ptr[0..len],
                                 );
                             },
                             .START_ARRAY => {

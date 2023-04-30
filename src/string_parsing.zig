@@ -70,7 +70,7 @@ inline fn handle_unicode_codepoint2(dst: []u8) !bool {
     }
     const offset = CharUtils.codepoint_to_utf8(code_point, &dst_buf);
     // try dst.appendSlice(allocator, dst_buf[0..offset]);
-    mem.copy(u8, dst, dst_buf[0..offset]);
+    @memcpy(dst, dst_buf[0..offset]);
     return offset > 0;
 }
 

@@ -696,8 +696,7 @@ fn from_chars(first_: [*]const u8) f64 {
     word = if (negative) word | (@as(u64, 1) << BinaryFormat.sign_index) else word;
     var value: f64 = undefined;
     //   std::memcpy(&value, &word, sizeof(double));
-    @memcpy(@ptrCast([*]u8, &value), @ptrCast([*]const u8, &word), @sizeOf(f64));
-    // return @bitCast(f64, word);
+    @memcpy(@ptrCast([*]u8, &value)[0..@sizeOf(f64)], @ptrCast([*]const u8, &word)[0..@sizeOf(f64)]);
     return value;
 }
 
@@ -804,7 +803,7 @@ fn to_double(_mantissa: u64, real_exponent: u64, negative: u1) f64 {
     mantissa |= real_exponent << 52;
     mantissa |= (@as(u64, negative) << 63);
     // std::memcpy(&d, &mantissa, sizeof(d));
-    @memcpy(@ptrCast([*]u8, &d), @ptrCast([*]const u8, &mantissa), @sizeOf(f64));
+    @memcpy(@ptrCast([*]u8, &d)[0..@sizeOf(f64)], @ptrCast([*]const u8, &mantissa)[0..@sizeOf(f64)]);
     return d;
 }
 
