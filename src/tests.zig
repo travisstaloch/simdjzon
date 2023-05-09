@@ -435,7 +435,7 @@ test "ondemand array iteration" {
     }.func);
 }
 
-test "ondemand array iteration nested" {
+test "ondemand array iteration nested 1" {
     try test_ondemand_doc(
         \\[
         \\  { "xs": [ 1.0, 2.0, 3.0, 4.0 ] },
@@ -447,13 +447,15 @@ test "ondemand array iteration nested" {
             var arr = try doc.get_array();
             var arrit = arr.iterator();
 
-            while (try arrit.next()) |*e| {
+            while (try arrit.next()) |e_| {
+                var e = e_;
                 var obj = try e.get_object();
                 var xs = try obj.find_field("xs");
                 var arr2 = try xs.get_array();
                 var it = arr2.iterator();
                 var i: u8 = 0;
-                while (try it.next()) |*e2| {
+                while (try it.next()) |e2_| {
+                    var e2 = e2_;
                     try testing.expectApproxEqAbs(
                         @intToFloat(f64, i + 1),
                         try e2.get_double(),
@@ -619,7 +621,7 @@ test "get_string_alloc" {
     }.func);
 }
 
-test "ondemand array iteration nested" {
+test "ondemand array iteration nested 2" {
     try test_ondemand_doc(
         \\{"a": [{}, {}] }
     , struct {
