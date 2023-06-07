@@ -285,24 +285,91 @@ test "at_pointer" {
     try testing.expectEqual(@as(i64, 1), try b0.get_int64());
 }
 
-test "get_alloc" {
-    const T = struct { xs: []struct { a: u8 } };
+test "get_alloc integer slice" {
+    const T = []u8;
+    const input =
+        \\[0,1,2]
+    ;
 
+    var parser = try dom.Parser.initFixedBuffer(allr, input, .{});
+    defer parser.deinit();
+    try parser.parse();
+    var s: T = undefined;
+    defer allr.free(s);
+    try parser.element().get_alloc(allr, &s);
+
+    try std.testing.expectEqual(@as(usize, 3), s.len);
+    for (s, 0..) |item, i| {
+        try std.testing.expectEqual(@intCast(u8, i), item);
+    }
+}
+
+test "get_alloc struct field slice" {
+    const T = struct { xs: []struct { a: u8 } };
+    const input =
+        \\{ "xs": [{"a": 42}, {"a": 42}]}
+    ;
+
+    var parser = try dom.Parser.initFixedBuffer(allr, input, .{});
+    defer parser.deinit();
+    try parser.parse();
+    var s: T = undefined;
+    defer allr.free(s.xs);
+    try parser.element().get_alloc(allr, &s);
+
+    try std.testing.expectEqual(@as(usize, 2), s.xs.len);
+    for (s.xs) |item| {
+        try std.testing.expectEqual(@as(u8, 42), item.a);
+    }
+}
+
+test "get_alloc struct field slice more field types" {
+    const S = struct { a: u8, b: []const u8, c: struct { d: u8 } };
+    const T = struct { xs: []S };
     const input =
         \\{ "xs": [
-        \\{"a": 42}
+        \\{"a": 42, "b": "b-string", "c": {"d": 126}},
+        \\{"a": 42, "b": "b-string", "c": {"d": 126}}
         \\]}
     ;
 
     var parser = try dom.Parser.initFixedBuffer(allr, input, .{});
     defer parser.deinit();
     try parser.parse();
-
     var s: T = undefined;
-    defer std.testing.allocator.free(s.xs);
+    defer allr.free(s.xs);
     try parser.element().get_alloc(allr, &s);
-    try std.testing.expectEqual(@as(usize, 1), s.xs.len);
-    try std.testing.expectEqual(@as(u8, 42), s.xs[0].a);
+
+    try std.testing.expectEqual(@as(usize, 2), s.xs.len);
+    for (s.xs) |item| {
+        try std.testing.expectEqual(@as(u8, 42), item.a);
+        try std.testing.expectEqualStrings("b-string", item.b);
+        try std.testing.expectEqual(@as(u8, 126), item.c.d);
+    }
+}
+
+test "get_alloc slice of struct" {
+    const S = struct { a: u8, b: []const u8 };
+    const T = []S;
+    const input =
+        \\[
+        \\{"a": 42, "b": "b-string" },
+        \\{"a": 42, "b": "b-string" }
+        \\]
+    ;
+
+    var parser = try dom.Parser.initFixedBuffer(allr, input, .{});
+    defer parser.deinit();
+    try parser.parse();
+    var s: T = undefined;
+    defer allr.free(s);
+    try parser.element().get_alloc(allr, &s);
+
+    try std.testing.expectEqual(@as(usize, 2), s.len);
+    for (s) |item| {
+        try std.testing.expectEqual(@as(u8, 42), item.a);
+        try std.testing.expectEqualStrings("b-string", item.b);
+    }
 }
 
 // const ondemand = @import("ondemand.zig");
