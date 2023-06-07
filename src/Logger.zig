@@ -24,7 +24,8 @@ fn pad_with(comptime s: []const u8, comptime pad_byte: u8, comptime len: u8) [le
 fn pad_with_alloc(s: []const u8, pad_byte: u8, len: u8, allocator: mem.Allocator) []const u8 {
     var buf = allocator.alloc(u8, len) catch return s;
     @memset(buf, pad_byte);
-    @memcpy(buf, s[0..std.math.min(s.len, buf.len)]);
+    const clen = std.math.min(s.len, buf.len);
+    @memcpy(buf[0..clen], s[0..clen]);
     return buf;
 }
 
@@ -78,7 +79,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
             if (is_ondemand) {
                 var len = std.math.min(iter.parser.read_buf_len, log_buf2.len);
                 const ptr = iter.peek(ci, len) catch break :blk null;
-                @memcpy(&log_buf2, ptr[0..len]);
+                @memcpy(log_buf2[0..len], ptr[0..len]);
             }
 
             for (&log_buf2, 0..) |*c, i| {
@@ -97,7 +98,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
         if (is_ondemand) {
             const len = std.math.min(iter.parser.read_buf_len, log_buf2.len);
             const ptr = iter.peek(next_index, len) catch break :blk null;
-            @memcpy(&log_buf2, ptr[0..len]);
+            @memcpy(log_buf2[0..len], ptr[0..len]);
         }
 
         const end_pos = if (!is_ondemand) iter.parser.bytes.len else iter.parser.end_pos;
