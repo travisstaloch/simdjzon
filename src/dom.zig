@@ -1652,7 +1652,7 @@ const Value = union(ElementType) {
     INT64: i64,
     UINT64: u64,
     DOUBLE: f64,
-    STRING: []const u8,
+    STRING: []u8,
     ARRAY: Array,
     OBJECT: Object,
 };
@@ -1697,8 +1697,8 @@ const TapeRef = struct {
         return mem.readIntLittle(u32, (tr.doc.string_buf.ptr + string_buf_index)[0..@sizeOf(u32)]);
     }
 
-    pub fn get_c_str(tr: TapeRef) [*:0]const u8 {
-        return @ptrCast([*:0]const u8, tr.doc.string_buf.ptr + tr.value() + @sizeOf(u32));
+    pub fn get_c_str(tr: TapeRef) [*:0]u8 {
+        return @ptrCast([*:0]u8, tr.doc.string_buf.ptr + tr.value() + @sizeOf(u32));
     }
 
     pub fn get_as_type(tr: TapeRef, comptime T: type) T {
@@ -1711,7 +1711,7 @@ const TapeRef = struct {
         return @bitCast(T, tr.doc.tape.items[tr.idx + 1]);
     }
 
-    pub fn get_string(tr: TapeRef) []const u8 {
+    pub fn get_string(tr: TapeRef) []u8 {
         return tr.get_c_str()[0..tr.get_string_length()];
     }
 
@@ -1727,7 +1727,7 @@ const TapeRef = struct {
     }
 
     pub fn element(tr: TapeRef) Element {
-        return .{ .tape = tr.tape };
+        return .{ .tape = tr };
     }
 };
 
@@ -1782,6 +1782,39 @@ const Element = struct {
         return ele.getImpl(.{ out, allocator });
     }
 
+    fn readSlice(
+        ele: Element,
+        out: anytype,
+        args: anytype,
+        comptime child_info: std.builtin.Type,
+        comptime C: type,
+    ) cmn.Error!void {
+        const Cchild = child_info.Pointer.child;
+        // FIXME: convert this panic to a compile error. this shouldn't be possible
+        if (@typeInfo(@TypeOf(args[1])) == .Null)
+            @panic("allocator required for type: " ++ @typeName(C) ++
+                ".  Consider using get_alloc()");
+        const allocator = args[1];
+        var elems = std.ArrayList(Cchild).init(allocator);
+        var arr = ele.get_array() catch unreachable;
+        var it = TapeRefIterator.init(arr);
+        // for (it.tape.doc.tape.items, 0..) |item, i| {
+        //     std.debug.print("{}/{}={}\n", .{ i, it.end_idx, TapeType.from_u64(item) });
+        // }
+
+        while (true) {
+            const arr_ele = Element{ .tape = it.tape };
+            var out_ele: Cchild = undefined;
+            const idx = it.tape.after_element();
+            // std.debug.print("next_element={}:{}\n", .{ idx, TapeType.from_u64(it.tape.doc.tape.items[idx]) });
+            try arr_ele.getImpl(.{ &out_ele, args[1] });
+            try elems.append(out_ele);
+            it.tape.idx = idx;
+            if (it.tape.idx >= it.end_idx) break;
+        }
+        out.* = try elems.toOwnedSlice();
+    }
+
     fn getImpl(ele: Element, args: anytype) cmn.Error!void {
         const out = args[0];
         const T = @TypeOf(out);
@@ -1820,24 +1853,18 @@ const Element = struct {
                                 }
                             },
                             .Pointer => if (child_info.Pointer.size == .Slice) {
-                                if (child_info.Pointer.child == u8)
-                                    out.* = try ele.get_string()
-                                else {
-                                    const Cchild = child_info.Pointer.child;
-                                    if (@typeInfo(@TypeOf(args[1])) == .Null)
-                                        @compileError("allocator required for type: " ++ @typeName(C) ++
-                                            ".  Consider using get_alloc()");
-                                    const allocator = args[1];
-                                    var elems = std.ArrayList(Cchild).init(allocator);
-                                    var it = TapeRefIterator.init(try ele.get_array());
-                                    while (true) {
-                                        const arr_ele = Element{ .tape = it.tape };
-                                        var out_ele: Cchild = undefined;
-                                        arr_ele.get_alloc(allocator, &out_ele) catch break;
-                                        try elems.append(out_ele);
-                                        _ = it.next() orelse break;
+                                if (child_info.Pointer.child == u8) {
+                                    // std.debug.print("ele.tape.tape_ref_type()={}", .{ele.tape.tape_ref_type()});
+                                    switch (ele.tape.tape_ref_type()) {
+                                        .STRING => out.* = try ele.get_string(),
+                                        .START_ARRAY => try readSlice(ele, out, args, child_info, C),
+                                        else => return error.INCORRECT_TYPE,
                                     }
-                                    out.* = try elems.toOwnedSlice();
+                                } else {
+                                    switch (ele.tape.tape_ref_type()) {
+                                        .START_ARRAY => try readSlice(ele, out, args, child_info, C),
+                                        else => return error.INCORRECT_TYPE,
+                                    }
                                 }
                             } else @compileError("unsupported type: " ++ @typeName(T) ++
                                 ". expecting slice"),
@@ -1923,7 +1950,7 @@ const Element = struct {
         const val = try ele.get_tape_type(.DOUBLE);
         return val.DOUBLE;
     }
-    pub fn get_string(ele: Element) ![]const u8 {
+    pub fn get_string(ele: Element) ![]u8 {
         return (try ele.get_tape_type(.STRING)).STRING;
     }
     pub fn get_bool(ele: Element) !bool {
@@ -1974,5 +2001,9 @@ const Element = struct {
             .BOOL => ele.tape.is(.TRUE) or ele.tape.is(.FALSE),
             .NULL => ele.tape.is(.NULL),
         };
+    }
+
+    pub fn get_type(ele: Element) TapeType {
+        return ele.tape.tape_ref_type();
     }
 };
