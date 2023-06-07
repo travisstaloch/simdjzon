@@ -1771,7 +1771,19 @@ const Element = struct {
         return if (ele.get_as_type(.ARRAY)) |a| a.ARRAY.at(idx) else |_| null;
     }
 
+    /// parse from 'ele' into 'out' pointer
     pub fn get(ele: Element, out: anytype) cmn.Error!void {
+        return ele.getImpl(.{ out, null });
+    }
+
+    /// parse from 'ele' into 'out' pointer.
+    /// to be used inplace of get() when 'out' contains non-string slice types.
+    pub fn get_alloc(ele: Element, allocator: mem.Allocator, out: anytype) cmn.Error!void {
+        return ele.getImpl(.{ out, allocator });
+    }
+
+    fn getImpl(ele: Element, args: anytype) cmn.Error!void {
+        const out = args[0];
         const T = @TypeOf(out);
         const info = @typeInfo(T);
         switch (info) {
@@ -1791,24 +1803,42 @@ const Element = struct {
                                 null
                             else blk: {
                                 var x: std.meta.Child(C) = undefined;
-                                try ele.get(&x);
+                                try ele.getImpl(.{ &x, args[1] });
                                 break :blk x;
                             },
-                            .Array => try ele.get(@as([]std.meta.Child(C), out)),
+                            .Array => try ele.getImpl(.{ @as([]std.meta.Child(C), out), args[1] }),
                             .Struct => {
                                 switch (ele.tape.tape_ref_type()) {
                                     .START_OBJECT => {
                                         var obj = ele.get_object() catch unreachable;
                                         inline for (std.meta.fields(C)) |field| {
                                             if (obj.at_key(field.name)) |obj_ele|
-                                                try obj_ele.get(&@field(out, field.name));
+                                                try obj_ele.getImpl(.{ &@field(out, field.name), args[1] });
                                         }
                                     },
                                     else => return error.INCORRECT_TYPE,
                                 }
                             },
                             .Pointer => if (child_info.Pointer.size == .Slice) {
-                                out.* = try ele.get_string();
+                                if (child_info.Pointer.child == u8)
+                                    out.* = try ele.get_string()
+                                else {
+                                    const Cchild = child_info.Pointer.child;
+                                    if (@typeInfo(@TypeOf(args[1])) == .Null)
+                                        @compileError("allocator required for type: " ++ @typeName(C) ++
+                                            ".  Consider using get_alloc()");
+                                    const allocator = args[1];
+                                    var elems = std.ArrayList(Cchild).init(allocator);
+                                    var it = TapeRefIterator.init(try ele.get_array());
+                                    while (true) {
+                                        const arr_ele = Element{ .tape = it.tape };
+                                        var out_ele: Cchild = undefined;
+                                        arr_ele.get_alloc(allocator, &out_ele) catch break;
+                                        try elems.append(out_ele);
+                                        _ = it.next() orelse break;
+                                    }
+                                    out.* = try elems.toOwnedSlice();
+                                }
                             } else @compileError("unsupported type: " ++ @typeName(T) ++
                                 ". expecting slice"),
                             else => @compileError("unsupported type: " ++ @typeName(T) ++
@@ -1830,7 +1860,7 @@ const Element = struct {
                                 var it = TapeRefIterator.init(arr);
                                 for (out) |*out_ele| {
                                     const arr_ele = Element{ .tape = it.tape };
-                                    try arr_ele.get(out_ele);
+                                    try arr_ele.getImpl(.{ out_ele, args[1] });
                                     _ = it.next() orelse break;
                                 }
                             },

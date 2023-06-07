@@ -285,6 +285,26 @@ test "at_pointer" {
     try testing.expectEqual(@as(i64, 1), try b0.get_int64());
 }
 
+test "get_alloc" {
+    const T = struct { xs: []struct { a: u8 } };
+
+    const input =
+        \\{ "xs": [
+        \\{"a": 42}
+        \\]}
+    ;
+
+    var parser = try dom.Parser.initFixedBuffer(allr, input, .{});
+    defer parser.deinit();
+    try parser.parse();
+
+    var s: T = undefined;
+    defer std.testing.allocator.free(s.xs);
+    try parser.element().get_alloc(allr, &s);
+    try std.testing.expectEqual(@as(usize, 1), s.xs.len);
+    try std.testing.expectEqual(@as(u8, 42), s.xs[0].a);
+}
+
 // const ondemand = @import("ondemand.zig");
 test "ondemand get with struct" {
     const S = struct { a: struct { b: []const u8 } };
