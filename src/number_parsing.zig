@@ -721,7 +721,7 @@ fn parse_float_fallback(ptr: [*]const u8, outDouble: *f64) bool {
     // Therefore, fall back to this solution (the extra parens are there
     // to handle that max may be a macro on windows).
     // println("parse_float_fallback {} std.math.f64_min {} std.math.f64_max {} {} {}", .{ outDouble.*, std.math.f64_min, std.math.f64_max, std.math.f64_min < outDouble.*, outDouble.* < std.math.f64_max });
-    return !(outDouble.* > std.math.f64_max or outDouble.* < -std.math.f64_max);
+    return !(outDouble.* > std.math.floatMax(f64) or outDouble.* < -std.math.floatMax(f64));
 }
 
 fn write_float(

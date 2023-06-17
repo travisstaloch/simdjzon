@@ -137,7 +137,7 @@ test "float" {
         try testing.expectApproxEqAbs(
             @as(f64, 0.000000000000000000000000000000000000000000000000000000000000000000000000000001),
             @bitCast(f64, parser.doc.tape.items[3]),
-            std.math.f64_epsilon,
+            std.math.floatEps(f64),
         );
         try testing.expectEqual(
             TapeType.DOUBLE.encode_value(0),
@@ -146,7 +146,7 @@ test "float" {
         try testing.expectApproxEqAbs(
             @as(f64, 0.1),
             @bitCast(f64, parser.doc.tape.items[5]),
-            std.math.f64_epsilon,
+            std.math.floatEps(f64),
         );
         try testing.expectEqual(
             TapeType.DOUBLE.encode_value(0),
@@ -155,7 +155,7 @@ test "float" {
         try testing.expectApproxEqAbs(
             @as(f64, 0.01),
             @bitCast(f64, parser.doc.tape.items[7]),
-            std.math.f64_epsilon,
+            std.math.floatEps(f64),
         );
     }
 }
@@ -473,7 +473,7 @@ test "ondemand struct iteration types" {
             {
                 var f = (try objit.next(&buf)) orelse return testing.expect(false);
                 try testing.expectEqualStrings("f", buf[0..1]);
-                try testing.expectApproxEqAbs(@as(f64, 1.23), try f.value.get_double(), std.math.f64_epsilon);
+                try testing.expectApproxEqAbs(@as(f64, 1.23), try f.value.get_double(), std.math.floatEps(f64));
             }
             {
                 var f = (try objit.next(&buf)) orelse return testing.expect(false);
@@ -546,7 +546,7 @@ test "ondemand array iteration nested 1" {
                     try testing.expectApproxEqAbs(
                         @intToFloat(f64, i + 1),
                         try e2.get_double(),
-                        std.math.f64_epsilon,
+                        std.math.floatEps(f64),
                     );
                     i += 1;
                 }
@@ -570,7 +570,7 @@ test "ondemand root types" {
         \\1.0
     , struct {
         fn func(doc: *ondemand.Document) E!void {
-            try testing.expectApproxEqAbs(@as(f64, 1.0), try doc.get_double(), std.math.f64_epsilon);
+            try testing.expectApproxEqAbs(@as(f64, 1.0), try doc.get_double(), std.math.floatEps(f64));
         }
     }.func);
     try test_ondemand_doc(
@@ -659,7 +659,7 @@ test "ondemand get struct" {
                 const S = struct { a: struct { b: [3]u8, c: f32, d: bool, f: ?u8 } };
                 var s: S = undefined;
                 try doc.get(&s, .{});
-                try testing.expectApproxEqAbs(@as(f32, 3.1416), s.a.c, std.math.f16_epsilon);
+                try testing.expectApproxEqAbs(@as(f32, 3.1416), s.a.c, std.math.floatEps(f16));
                 try testing.expectEqual(true, s.a.d);
                 try testing.expectEqual(@as(?u8, null), s.a.f);
                 try testing.expectEqualSlices(u8, &.{ 1, 2, 3 }, &s.a.b);
