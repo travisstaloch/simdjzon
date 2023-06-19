@@ -24,7 +24,7 @@ fn pad_with(comptime s: []const u8, comptime pad_byte: u8, comptime len: u8) [le
 fn pad_with_alloc(s: []const u8, pad_byte: u8, len: u8, allocator: mem.Allocator) []const u8 {
     var buf = allocator.alloc(u8, len) catch return s;
     @memset(buf, pad_byte);
-    const clen = std.math.min(s.len, buf.len);
+    const clen = @min(s.len, buf.len);
     @memcpy(buf[0..clen], s[0..clen]);
     return buf;
 }
@@ -77,7 +77,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
     const content = blk: {
         if (current_index) |ci| {
             if (is_ondemand) {
-                var len = std.math.min(iter.parser.read_buf_len, log_buf2.len);
+                var len = @min(iter.parser.read_buf_len, log_buf2.len);
                 const ptr = iter.peek(ci, len) catch break :blk null;
                 @memcpy(log_buf2[0..len], ptr[0..len]);
             }
@@ -96,7 +96,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
     print("| {?s} ", .{content});
     const next_content = blk: {
         if (is_ondemand) {
-            const len = std.math.min(iter.parser.read_buf_len, log_buf2.len);
+            const len = @min(iter.parser.read_buf_len, log_buf2.len);
             const ptr = iter.peek(next_index, len) catch break :blk null;
             @memcpy(log_buf2[0..len], ptr[0..len]);
         }

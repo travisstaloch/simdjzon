@@ -774,7 +774,7 @@ pub const ValueIterator = struct {
 
     fn field_key(vi: *ValueIterator) ![*]const u8 {
         vi.assert_at_next();
-        var key = try vi.iter.advance(std.math.cast(u16, std.math.min(
+        var key = try vi.iter.advance(std.math.cast(u16, @min(
             READ_BUF_CAP,
             vi.peek_start_length(),
         )) orelse return error.Overflow);
@@ -803,11 +803,11 @@ pub const ValueIterator = struct {
         vi.iter.abandon();
     }
     pub fn copy_key_with_quotes(key_buf: []u8, key: [*]const u8, key_len: usize) void {
-        const len = std.math.min(key_len + 2, key_buf.len);
+        const len = @min(key_len + 2, key_buf.len);
         @memcpy(key_buf[0..len], key[0..len]);
     }
     fn copy_key_without_quotes(key_buf: []u8, key: [*]const u8, key_len: usize) void {
-        const len = std.math.min(key_len, key_buf.len);
+        const len = @min(key_len, key_buf.len);
         @memcpy(key_buf[0 .. len - 1], key[1..len]);
     }
     fn find_field_raw(vi: *ValueIterator, key: []const u8) !bool {
@@ -1079,7 +1079,7 @@ pub const ValueIterator = struct {
 
     pub fn get_string(vi: *ValueIterator, comptime T: type, dest: []u8) !T {
         if (dest.len + 2 < vi.peek_start_length()) return error.CAPACITY;
-        const peek_len = std.math.cast(u16, std.math.min(READ_BUF_CAP, dest.len)) orelse return error.Overflow;
+        const peek_len = std.math.cast(u16, @min(READ_BUF_CAP, dest.len)) orelse return error.Overflow;
         return unescape(T, try vi.get_raw_json_string(peek_len), dest.ptr);
     }
     pub fn get_string_alloc(vi: *ValueIterator, comptime T: type, allocator: mem.Allocator) !T {
@@ -1129,7 +1129,7 @@ pub const ValueIterator = struct {
     }
     fn get_root_double(vi: *ValueIterator) !f64 {
         const max_len = vi.peek_start_length();
-        const N = comptime std.math.min(1074 + 8 + 1, READ_BUF_CAP);
+        const N = comptime @min(1074 + 8 + 1, READ_BUF_CAP);
         const json = try vi.advance_root_scalar("double", N);
         // Per https://www.exploringbinary.com/maximum-number-of-decimal-digits-in-binary-floating-point-numbers/, 1074 is the maximum number of significant fractional digits. Add 8 more digits for the biggest number: -0.<fraction>e-308.
         var tmpbuf: [N]u8 = undefined;

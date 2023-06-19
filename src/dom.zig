@@ -1192,7 +1192,7 @@ pub const TapeBuilder = struct {
         // Write the start tape element, pointing at the end location (and including count)
         // count can overflow if it exceeds 24 bits... so we saturate
         // the convention being that a cnt of 0xffffff or more is undetermined in value (>=  0xffffff).
-        const cntsat: u32 = std.math.min(@intCast(u32, container.count), 0xFFFFFF);
+        const cntsat: u32 = @min(@intCast(u32, container.count), 0xFFFFFF);
 
         // iter.log.line_fmt(iter, "", "end_container", "next_tape_index {}", .{tb.next_tape_index()});
         tb.write(start_tape_index, tb.next_tape_index() | (@as(u64, cntsat) << 32), start);
@@ -1876,7 +1876,7 @@ const Element = struct {
                         switch (ele.tape.tape_ref_type()) {
                             .STRING => {
                                 const string = ele.get_string() catch unreachable;
-                                const len = std.math.min(string.len, out.len * @sizeOf(C));
+                                const len = @min(string.len, out.len * @sizeOf(C));
                                 @memcpy(
                                     @ptrCast([*]u8, out.ptr)[0..len],
                                     string.ptr[0..len],
