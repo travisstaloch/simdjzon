@@ -32,7 +32,7 @@ pub fn parse_number(
     tb: *TapeBuilder,
 ) Error!void {
     const negative = src[0] == '-';
-    var p = src + @boolToInt(negative);
+    var p = src + @intFromBool(negative);
 
     //
     // Parse the integer part.
@@ -157,8 +157,8 @@ fn parse_decimal(src: [*]const u8, p: *[*]const u8, i: *u64, exponent: *i64) !vo
     while (parse_digit(u64, p.*[0], i)) p.* += 1;
 
     exponent.* =
-        (std.math.cast(i64, @ptrToInt(first_after_period)) orelse return error.Overflow) -
-        (std.math.cast(i64, @ptrToInt(p.*)) orelse return error.Overflow);
+        (std.math.cast(i64, @intFromPtr(first_after_period)) orelse return error.Overflow) -
+        (std.math.cast(i64, @intFromPtr(p.*)) orelse return error.Overflow);
     // std.log.debug("exponent {} firstap {*} p {*}", .{ exponent.*, first_after_period, p });
     // Decimal without digits (123.) is illegal
     if (exponent.* == 0) {
@@ -197,7 +197,7 @@ inline fn parse_exponent(src: [*]const u8, p: *[*]const u8, exponent: *i64) !voi
 
     // If there were more than 18 digits, we may have overflowed the integer. We have to do
     // something!!!!
-    if (@ptrToInt(p.*) > @ptrToInt(start_exp + 18)) {
+    if (@intFromPtr(p.*) > @intFromPtr(start_exp + 18)) {
         // Skip leading zeroes: 1e000000000000000000001 is technically valid and doesn't overflow
         while (start_exp[0] == '0') start_exp += 1;
 
@@ -210,7 +210,7 @@ inline fn parse_exponent(src: [*]const u8, p: *[*]const u8, exponent: *i64) !voi
         // truncate at 324.
         // Note that there is no reason to fail per se at this point in time.
         // E.g., 0e999999999999999999999 is a fine number.
-        if (@ptrToInt(p.*) > @ptrToInt(start_exp + 18)) {
+        if (@intFromPtr(p.*) > @intFromPtr(start_exp + 18)) {
             exp_number = 999999999999999999;
         }
     }
@@ -229,7 +229,7 @@ fn significant_digits(start_digits: [*]const u8, digit_count: usize) usize {
     while ((start[0] == '0') or (start[0] == '.')) start += 1;
 
     // we over-decrement by one when there is a '.'
-    return digit_count -% @ptrToInt(start) - @ptrToInt(start_digits);
+    return digit_count -% @intFromPtr(start) - @intFromPtr(start_digits);
 }
 
 fn slow_float_parsing(src: [*]const u8, writer: *TapeBuilder) !void {
@@ -300,7 +300,7 @@ fn parse_decimal2(p_: [*]const u8) Decimal {
             p += 1;
         }
 
-        answer.decimal_point = @truncate(i32, @bitCast(isize, @ptrToInt(first_after_period) -% @ptrToInt(p)));
+        answer.decimal_point = @truncate(i32, @bitCast(isize, @intFromPtr(first_after_period) -% @intFromPtr(p)));
     }
     if (answer.num_digits > 0) {
         var preverse = p - 1;
@@ -826,7 +826,7 @@ inline fn compute_float_64(power: i64, _i: u64, negative: bool, d: *f64) bool {
         // convert the integer into a double. This is lossless since
         // 0 <= i <= 2^53 - 1.
         // d = double(i);
-        d.* = @intToFloat(f64, i);
+        d.* = @floatFromInt(f64, i);
         //
         // The general idea is as follows.
         // If 0 <= s < 2^53 and if 10^0 <= p <= 10^22 then
@@ -1001,7 +1001,7 @@ inline fn compute_float_64(power: i64, _i: u64, negative: bool, d: *f64) bool {
         // subnormal, but we can only know this after rounding.
         // So we only declare a subnormal if we are smaller than the threshold.
         real_exponent = if (mantissa < (@as(u64, 1) << 52)) 0 else 1;
-        d.* = to_double(mantissa, @bitCast(u64, real_exponent), @boolToInt(negative));
+        d.* = to_double(mantissa, @bitCast(u64, real_exponent), @intFromBool(negative));
         return true;
     }
     // We have to round to even. The "to even" part
@@ -1049,7 +1049,7 @@ inline fn compute_float_64(power: i64, _i: u64, negative: bool, d: *f64) bool {
         // We have an infinite value!!! We could actually throw an error here if we could.
         return false;
     }
-    d.* = to_double(mantissa, @bitCast(u64, real_exponent), @boolToInt(negative));
+    d.* = to_double(mantissa, @bitCast(u64, real_exponent), @intFromBool(negative));
     return true;
 }
 
@@ -1773,7 +1773,7 @@ pub fn parse_integer(src: [*]const u8) !u64 {
     // Check for minus sign
     //
     const negative = (src[0] == '-');
-    var p = src + @boolToInt(negative);
+    var p = src + @intFromBool(negative);
 
     //
     // Parse the integer part.
@@ -1835,14 +1835,14 @@ pub fn parse_double(src_: [*]const u8) !f64 {
     // Check for minus sign
     //
     const negative = (src_[0] == '-');
-    var src = src_ + @boolToInt(negative);
+    var src = src_ + @intFromBool(negative);
 
     //
     // Parse the integer part.
     //
     var i: u64 = 0;
     var p = src;
-    p += @boolToInt(parse_digit(u64, p[0], &i));
+    p += @intFromBool(parse_digit(u64, p[0], &i));
     const leading_zero = (i == 0);
     while (parse_digit(u64, p[0], &i)) {
         p += 1;
@@ -1888,7 +1888,7 @@ pub fn parse_double(src_: [*]const u8) !f64 {
     if (p[0] == 'e' or p[0] == 'E') {
         p += 1;
         const exp_neg = p[0] == '-';
-        p += @boolToInt(exp_neg or p[0] == '+');
+        p += @intFromBool(exp_neg or p[0] == '+');
 
         var exp: u64 = 0;
         const start_exp_digits = p;
@@ -1915,7 +1915,7 @@ pub fn parse_double(src_: [*]const u8) !f64 {
             return d;
         }
     }
-    if (!parse_float_fallback(src - @boolToInt(negative), &d)) {
+    if (!parse_float_fallback(src - @intFromBool(negative), &d)) {
         return error.NUMBER_ERROR;
     }
     return d;

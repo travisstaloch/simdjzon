@@ -528,7 +528,7 @@ pub const Iterator = struct {
 
     pub inline fn next_structural(iter: *Iterator) [*]u32 {
         // std.log.debug("at-beginning {*}: {}", .{ iter.next_structural, iter.next_structural[0] });
-        return @intToPtr([*]u32, @ptrToInt(iter.token.index));
+        return @ptrFromInt([*]u32, @intFromPtr(iter.token.index));
     }
 
     fn reenter_child(iter: *Iterator, position: [*]const u32, child_depth: u32) void {
@@ -612,7 +612,7 @@ pub const ValueIterator = struct {
         assert(vi.depth == 1);
     }
     fn assert_at_child(vi: ValueIterator) void {
-        assert(@ptrToInt(vi.iter.token.index) > @ptrToInt(vi.start_position));
+        assert(@intFromPtr(vi.iter.token.index) > @intFromPtr(vi.start_position));
         assert(vi.iter.depth == vi.depth + 1);
         assert(vi.depth > 0);
     }
@@ -648,7 +648,7 @@ pub const ValueIterator = struct {
         return vi.iter.depth >= vi.depth;
     }
     fn skip_child(vi: *ValueIterator) !void {
-        assert(@ptrToInt(vi.iter.token.index) > @ptrToInt(vi.start_position));
+        assert(@intFromPtr(vi.iter.token.index) > @intFromPtr(vi.start_position));
         assert(vi.iter.depth >= vi.depth);
         return vi.iter.skip_child(vi.depth);
     }
@@ -721,7 +721,7 @@ pub const ValueIterator = struct {
     }
 
     fn assert_at_next(vi: ValueIterator) void {
-        assert(@ptrToInt(vi.iter.token.index) > @ptrToInt(vi.start_position));
+        assert(@intFromPtr(vi.iter.token.index) > @intFromPtr(vi.start_position));
         assert(vi.iter.depth == vi.depth);
         assert(vi.depth > 0);
     }
@@ -796,7 +796,7 @@ pub const ValueIterator = struct {
         return vi.iter.token.index == vi.start_position;
     }
     fn at_first_field(vi: ValueIterator) bool {
-        assert(@ptrToInt(vi.iter.token.index) > @ptrToInt(vi.start_position));
+        assert(@intFromPtr(vi.iter.token.index) > @intFromPtr(vi.start_position));
         return vi.iter.token.index == vi.start_position + 1;
     }
     fn abandon(vi: *ValueIterator) void {
@@ -1020,7 +1020,7 @@ pub const ValueIterator = struct {
         vi.iter.reenter_child(vi.start_position + 1, vi.depth);
 
         has_value = try vi.started_object();
-        while (@ptrToInt(vi.iter.token.index) < @ptrToInt(search_start)) {
+        while (@intFromPtr(vi.iter.token.index) < @intFromPtr(search_start)) {
             assert(has_value); // we should reach search_start before ever reaching the end of the object
             assert(vi.iter.depth == vi.depth); // We must be at the start of a field
 

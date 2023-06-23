@@ -854,7 +854,7 @@ pub const Iterator = struct {
 
     fn at_eof(iter: *Iterator) bool {
         // std.log.debug("at-beginning {*}: {}", .{ iter.next_structural, iter.next_structural[0] });
-        return @ptrToInt(iter._next_structural) == @ptrToInt(iter.parser.indexer.bit_indexer.tail.items.ptr + iter.parser.n_structural_indexes);
+        return @intFromPtr(iter._next_structural) == @intFromPtr(iter.parser.indexer.bit_indexer.tail.items.ptr + iter.parser.n_structural_indexes);
     }
 
     const State = enum {
@@ -1096,14 +1096,14 @@ pub const TapeType = enum(u8) {
     NULL = 'n',
     INVALID = 'i',
     pub fn as_u64(tt: TapeType) u64 {
-        return @as(u64, @enumToInt(tt)) << 56;
+        return @as(u64, @intFromEnum(tt)) << 56;
     }
     pub fn from_u64(x: u64) TapeType {
         return std.meta.intToEnum(TapeType, (x & 0xff00000000000000) >> 56) catch .INVALID;
     }
     pub fn encode_value(tt: TapeType, value: u64) u64 {
         assert(value <= std.math.maxInt(u56));
-        return @as(u64, @enumToInt(tt)) << 56 | value;
+        return @as(u64, @intFromEnum(tt)) << 56 | value;
     }
     pub fn extract_value(item: u64) u64 {
         return item & value_mask;

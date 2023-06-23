@@ -61,7 +61,7 @@ test "tape build 1" {
         "Private", "Thumbnail", "Url",   "http://ex.com/th.png", "Height", "Width",
         "array",   "Owner",
     };
-    while (@ptrToInt(p) < @ptrToInt(parser.doc.string_buf.ptr + parser.doc.string_buf.len)) : (j += 1) {
+    while (@intFromPtr(p) < @intFromPtr(parser.doc.string_buf.ptr + parser.doc.string_buf.len)) : (j += 1) {
         const len = mem.bytesAsValue(u32, p[0..4]).*;
         p += 4;
         const str = std.mem.span(p);
@@ -544,7 +544,7 @@ test "ondemand array iteration nested 1" {
                 while (try it.next()) |e2_| {
                     var e2 = e2_;
                     try testing.expectApproxEqAbs(
-                        @intToFloat(f64, i + 1),
+                        @floatFromInt(f64, i + 1),
                         try e2.get_double(),
                         std.math.floatEps(f64),
                     );
