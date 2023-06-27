@@ -300,7 +300,7 @@ fn parse_decimal2(p_: [*]const u8) Decimal {
             p += 1;
         }
 
-        answer.decimal_point = @truncate(i32, @bitCast(isize, @intFromPtr(first_after_period) -% @intFromPtr(p)));
+        answer.decimal_point = @truncate(@as(isize, @bitCast(@intFromPtr(first_after_period) -% @intFromPtr(p))));
     }
     if (answer.num_digits > 0) {
         var preverse = p - 1;
@@ -309,8 +309,8 @@ fn parse_decimal2(p_: [*]const u8) Decimal {
             if (preverse[0] == '0') trailing_zeros += 1;
             preverse -= 1;
         }
-        answer.decimal_point += @intCast(i32, answer.num_digits);
-        answer.num_digits -= @intCast(u32, trailing_zeros);
+        answer.decimal_point += @intCast(answer.num_digits);
+        answer.num_digits -= @intCast(trailing_zeros);
     }
     if (answer.num_digits > max_digits) {
         answer.num_digits = max_digits;
@@ -366,7 +366,7 @@ fn decimal_right_shift(h: *Decimal, shift: u6) void {
             break;
         }
     }
-    h.decimal_point -= @intCast(i32, read_index - 1);
+    h.decimal_point -= @intCast(read_index - 1);
     if (h.decimal_point < -decimal_point_range) { // it is zero
         h.num_digits = 0;
         h.decimal_point = 0;
@@ -376,14 +376,14 @@ fn decimal_right_shift(h: *Decimal, shift: u6) void {
     }
     const mask = (@as(u64, 1) << shift) - 1;
     while (read_index < h.num_digits) {
-        const new_digit = @intCast(u8, n >> shift);
+        const new_digit: u8 = @intCast(n >> shift);
         n = (10 * (n & mask)) + h.digits[read_index];
         read_index += 1;
         h.digits[write_index] = new_digit;
         write_index += 1;
     }
     while (n > 0) {
-        const new_digit = @intCast(u8, n >> shift);
+        const new_digit = @as(u8, @intCast(n >> shift));
         n = 10 * (n & mask);
         if (write_index < max_digits) {
             h.digits[write_index] = new_digit;
@@ -472,7 +472,7 @@ fn number_of_digits_decimal_left_shift(h: *Decimal, shift_: u32) u32 {
         5, 8, 6, 7, 3, 6, 1, 7, 3, 7, 9, 8, 8, 4, 0, 3, 5, 4, 7, 2, 0, 5, 9,
         6, 2, 2, 4, 0, 6, 9, 5, 9, 5, 3, 3, 6, 9, 1, 4, 0, 6, 2, 5,
     };
-    const pow5 = @ptrCast([*]const u8, &number_of_digits_decimal_left_shift_table_powers_of_5[pow5_a]);
+    const pow5: [*]const u8 = @ptrCast(&number_of_digits_decimal_left_shift_table_powers_of_5[pow5_a]);
     var i: u32 = 0;
     var n: u32 = pow5_b - pow5_a;
     while (i < n) : (i += 1) {
@@ -496,7 +496,7 @@ fn round(h: *Decimal) u64 {
         return std.math.maxInt(u64);
     }
     // at this point, we know that h.decimal_point >= 0
-    const dp: usize = @intCast(u32, h.decimal_point);
+    const dp: usize = @as(u32, @intCast(h.decimal_point));
     var n: u64 = 0;
     var i: u32 = 0;
 
@@ -523,16 +523,16 @@ fn decimal_left_shift(h: *Decimal, shift: u6) void {
         return;
 
     const num_new_digits = number_of_digits_decimal_left_shift(h, shift);
-    var read_index = @intCast(i32, h.num_digits - 1);
+    var read_index: i32 = @intCast(h.num_digits - 1);
     var write_index = h.num_digits - 1 + num_new_digits;
     var n: u64 = 0;
 
     while (read_index >= 0) {
-        n += @as(u64, h.digits[@intCast(u32, read_index)]) << shift;
+        n += @as(u64, h.digits[@intCast(read_index)]) << shift;
         const quotient = n / 10;
         const remainder = n - (10 * quotient);
         if (write_index < max_digits) {
-            h.digits[write_index] = @intCast(u8, remainder);
+            h.digits[write_index] = @intCast(remainder);
         } else if (remainder > 0) {
             h.truncated = true;
         }
@@ -544,7 +544,7 @@ fn decimal_left_shift(h: *Decimal, shift: u6) void {
         const quotient = n / 10;
         const remainder = n - (10 * quotient);
         if (write_index < max_digits) {
-            h.digits[write_index] = @intCast(u8, remainder);
+            h.digits[write_index] = @intCast(remainder);
         } else if (remainder > 0) {
             h.truncated = true;
         }
@@ -555,7 +555,7 @@ fn decimal_left_shift(h: *Decimal, shift: u6) void {
     if (h.num_digits > max_digits) {
         h.num_digits = max_digits;
     }
-    h.decimal_point += @intCast(i32, num_new_digits);
+    h.decimal_point += @intCast(num_new_digits);
     trim(h);
 }
 
@@ -597,16 +597,16 @@ fn compute_float(d: *Decimal) AdjustedMantissa {
     };
     var exp2: i32 = 0;
     while (d.decimal_point > 0) {
-        const n = @intCast(u32, d.decimal_point);
+        const n: u32 = @intCast(d.decimal_point);
         const shift = if (n < num_powers) powers[n] else max_shift;
-        decimal_right_shift(d, @intCast(u6, shift));
+        decimal_right_shift(d, @intCast(shift));
         if (d.decimal_point < -decimal_point_range) {
             // should be zero
             answer.power2 = 0;
             answer.mantissa = 0;
             return answer;
         }
-        exp2 += @as(i32, shift);
+        exp2 += shift;
     }
     // We shift left toward [1/2 ... 1].
     while (d.decimal_point <= 0) {
@@ -617,7 +617,7 @@ fn compute_float(d: *Decimal) AdjustedMantissa {
             }
             shift = if (d.digits[0] < 2) 2 else 1;
         } else {
-            var n = @intCast(u32, -d.decimal_point);
+            var n: u32 = @intCast(-d.decimal_point);
             shift = if (n < num_powers) powers[n] else max_shift;
         }
         decimal_left_shift(d, shift);
@@ -627,13 +627,13 @@ fn compute_float(d: *Decimal) AdjustedMantissa {
             answer.mantissa = 0;
             return answer;
         }
-        exp2 -= @intCast(i32, shift);
+        exp2 -= @intCast(shift);
     }
     // We are now in the range [1/2 ... 1] but the binary format uses [1 ... 2].
     exp2 -= 1;
     var minimum_exponent: i32 = BinaryFormat.minimum_exponent;
     while ((minimum_exponent + 1) > exp2) {
-        var n = @intCast(u6, (minimum_exponent + 1) - exp2);
+        var n: u6 = @intCast((minimum_exponent + 1) - exp2);
         if (n > max_shift) {
             n = max_shift;
         }
@@ -692,11 +692,11 @@ fn from_chars(first_: [*]const u8) f64 {
     }
     const am = parse_long_mantissa(f64, first);
     var word = am.mantissa;
-    word |= @intCast(u64, @as(i64, am.power2)) << BinaryFormat.mantissa_explicit_bits;
+    word |= @as(u64, @intCast(@as(i64, am.power2))) << BinaryFormat.mantissa_explicit_bits;
     word = if (negative) word | (@as(u64, 1) << BinaryFormat.sign_index) else word;
     var value: f64 = undefined;
     //   std::memcpy(&value, &word, sizeof(double));
-    @memcpy(@ptrCast([*]u8, &value)[0..@sizeOf(f64)], @ptrCast([*]const u8, &word)[0..@sizeOf(f64)]);
+    @memcpy(@as([*]u8, @ptrCast(&value))[0..@sizeOf(f64)], @as([*]const u8, @ptrCast(&word))[0..@sizeOf(f64)]);
     return value;
 }
 
@@ -803,7 +803,7 @@ fn to_double(_mantissa: u64, real_exponent: u64, negative: u1) f64 {
     mantissa |= real_exponent << 52;
     mantissa |= (@as(u64, negative) << 63);
     // std::memcpy(&d, &mantissa, sizeof(d));
-    @memcpy(@ptrCast([*]u8, &d)[0..@sizeOf(f64)], @ptrCast([*]const u8, &mantissa)[0..@sizeOf(f64)]);
+    @memcpy(@as([*]u8, @ptrCast(&d))[0..@sizeOf(f64)], @as([*]const u8, @ptrCast(&mantissa))[0..@sizeOf(f64)]);
     return d;
 }
 
@@ -826,7 +826,7 @@ inline fn compute_float_64(power: i64, _i: u64, negative: bool, d: *f64) bool {
         // convert the integer into a double. This is lossless since
         // 0 <= i <= 2^53 - 1.
         // d = double(i);
-        d.* = @floatFromInt(f64, i);
+        d.* = @floatFromInt(i);
         //
         // The general idea is as follows.
         // If 0 <= s < 2^53 and if 10^0 <= p <= 10^22 then
@@ -838,9 +838,9 @@ inline fn compute_float_64(power: i64, _i: u64, negative: bool, d: *f64) bool {
         // and s / p will produce correctly rounded values.
         //
         if (power < 0) {
-            d.* /= power_of_ten[@intCast(usize, -power)];
+            d.* /= power_of_ten[@intCast(-power)];
         } else {
-            d.* *= power_of_ten[@intCast(usize, power)];
+            d.* *= power_of_ten[@intCast(power)];
         }
         if (negative) {
             d.* = -d.*;
@@ -903,8 +903,8 @@ inline fn compute_float_64(power: i64, _i: u64, negative: bool, d: *f64) bool {
     const exponent: i64 = (((152170 + 65536) * power) >> 16) + 1024 + 63;
 
     // We want the most significant bit of i to be 1. Shift if needed.
-    var lz = @intCast(u7, @clz(i));
-    i <<= @intCast(u6, lz);
+    var lz: u7 = @intCast(@clz(i));
+    i <<= @as(u6, @intCast(lz));
 
     // We are going to need to do some 64-bit arithmetic to get a precise product.
     // We use a table lookup approach.
@@ -917,7 +917,7 @@ inline fn compute_float_64(power: i64, _i: u64, negative: bool, d: *f64) bool {
     // We want the most significant 64 bits of the product. We know
     // this will be non-zero because the most significant bit of i is
     // 1.
-    const index: u32 = 2 * @intCast(u32, power - smallest_power);
+    const index: u32 = 2 * @as(u32, @intCast(power - smallest_power));
     // Optimization: It may be that materializing the index as a variable might confuse some compilers and prevent effective complex-addressing loads. (Done for code clarity.)
     //
     // The full_multiplication function computes the 128-bit product of two 64-bit words
@@ -975,7 +975,7 @@ inline fn compute_float_64(power: i64, _i: u64, negative: bool, d: *f64) bool {
     // The final mantissa should be 53 bits with a leading 1.
     // We shift it so that it occupies 54 bits with a leading 1.
     ///////
-    const upperbit = @intCast(u6, upper >> 63);
+    const upperbit: u6 = @intCast(upper >> 63);
     var mantissa: u64 = upper >> (upperbit + 9);
     lz +%= 1 ^ upperbit;
 
@@ -988,7 +988,7 @@ inline fn compute_float_64(power: i64, _i: u64, negative: bool, d: *f64) bool {
             return true;
         }
         // next line is safe because -real_exponent + 1 < 0
-        mantissa >>= @bitCast(u6, @intCast(i6, -real_exponent + 1));
+        mantissa >>= @as(u6, @bitCast(@as(i6, @intCast(-real_exponent + 1))));
         // Thankfully, we can't have both "round-to-even" and subnormals because
         // "round-to-even" only occurs for powers close to 0.
         mantissa += (mantissa & 1); // round up
@@ -1001,7 +1001,7 @@ inline fn compute_float_64(power: i64, _i: u64, negative: bool, d: *f64) bool {
         // subnormal, but we can only know this after rounding.
         // So we only declare a subnormal if we are smaller than the threshold.
         real_exponent = if (mantissa < (@as(u64, 1) << 52)) 0 else 1;
-        d.* = to_double(mantissa, @bitCast(u64, real_exponent), @intFromBool(negative));
+        d.* = to_double(mantissa, @bitCast(real_exponent), @intFromBool(negative));
         return true;
     }
     // We have to round to even. The "to even" part
@@ -1027,7 +1027,7 @@ inline fn compute_float_64(power: i64, _i: u64, negative: bool, d: *f64) bool {
     // We require lower <= 1 and not lower == 0 because we could not prove that
     // that lower == 0 is implied; but we could prove that lower <= 1 is a necessary and sufficient test.
     if ((lower <= 1) and (power >= -4) and (power <= 23) and ((mantissa & 3) == 1)) {
-        if ((mantissa << @intCast(u6, upperbit + (64 - 53 - 2))) == upper) {
+        if ((mantissa << @as(u6, @intCast(upperbit + (64 - 53 - 2)))) == upper) {
             mantissa &= ~@as(u64, 1); // flip it so that we do not round up
         }
     }
@@ -1049,13 +1049,13 @@ inline fn compute_float_64(power: i64, _i: u64, negative: bool, d: *f64) bool {
         // We have an infinite value!!! We could actually throw an error here if we could.
         return false;
     }
-    d.* = to_double(mantissa, @bitCast(u64, real_exponent), @intFromBool(negative));
+    d.* = to_double(mantissa, @bitCast(real_exponent), @intFromBool(negative));
     return true;
 }
 
 test "shr neg i32" {
     var x: u64 = 0xffffffffffffffff;
-    x >>= @bitCast(u6, @as(i6, -3));
+    x >>= @as(u6, @bitCast(@as(i6, -3)));
     try std.testing.expectEqual(@as(u64, 7), x);
 }
 
@@ -1899,7 +1899,7 @@ pub fn parse_double(src_: [*]const u8) !f64 {
         const num_exp_digits = try common.ptr_diff(u16, p, start_exp_digits);
         if (num_exp_digits == 0 or num_exp_digits > 19) return error.NUMBER_ERROR;
 
-        exponent += @bitCast(i64, if (exp_neg) 0 -% exp else exp);
+        exponent += @bitCast(if (exp_neg) 0 -% exp else exp);
     }
 
     if (CharUtils.is_not_structural_or_whitespace(p[0])) return error.NUMBER_ERROR;

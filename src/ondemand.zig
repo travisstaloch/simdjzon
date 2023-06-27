@@ -89,7 +89,7 @@ pub const Value = struct {
                     .One => {
                         switch (child_info) {
                             .Int => out.* = try val.get_int(C),
-                            .Float => out.* = @floatCast(C, try val.get_double()),
+                            .Float => out.* = @floatCast(try val.get_double()),
                             .Bool => out.* = try val.get_bool(),
                             .Optional => out.* = if (try val.is_null())
                                 null
@@ -380,9 +380,9 @@ const TokenIterator = struct {
     pub fn peek_delta(ti: *TokenIterator, parser: *Parser, delta: i32, len: u16) ![*]const u8 {
         return parser.peek(
             if (delta < 0)
-                ti.index - @intCast(u32, -delta)
+                ti.index - @as(u32, @intCast(-delta))
             else
-                ti.index + @intCast(u32, delta),
+                ti.index + @as(u32, @intCast(delta)),
             len,
         );
     }
@@ -528,7 +528,7 @@ pub const Iterator = struct {
 
     pub inline fn next_structural(iter: *Iterator) [*]u32 {
         // std.log.debug("at-beginning {*}: {}", .{ iter.next_structural, iter.next_structural[0] });
-        return @ptrFromInt([*]u32, @intFromPtr(iter.token.index));
+        return @ptrFromInt(@intFromPtr(iter.token.index));
     }
 
     fn reenter_child(iter: *Iterator, position: [*]const u32, child_depth: u32) void {
@@ -540,7 +540,7 @@ pub const Iterator = struct {
     }
 
     pub fn string_buf_loc(iter: Iterator) [*]const u8 {
-        return @ptrCast([*]const u8, &iter.token.buf) + iter.token.index[0] - iter.token.buf_start_pos;
+        return @as([*]const u8, @ptrCast(&iter.token.buf)) + iter.token.index[0] - iter.token.buf_start_pos;
     }
 
     fn copy_to_buffer(json: [*]const u8, max_len_: u32, comptime N: u16, tmpbuf: *[N]u8) bool {
@@ -1066,7 +1066,7 @@ pub const ValueIterator = struct {
             try vi.advance_non_root_scalar(@typeName(T), peek_len),
         );
         return std.math.cast(T, if (@typeInfo(T).Int.signedness == .signed)
-            @bitCast(i64, u64int)
+            @as(i64, @bitCast(u64int))
         else
             u64int) orelse return error.Overflow;
     }
@@ -1350,7 +1350,7 @@ pub const Parser = struct {
         cmn.println("", .{});
         while (true) : (pos += cmn.STEP_SIZE) {
             // cmn.println("i {} pos {}", .{ i, pos });
-            bytes_read = @intCast(u32, try p.src.read(&read_buf));
+            bytes_read = @intCast(try p.src.read(&read_buf));
             if (bytes_read < cmn.STEP_SIZE) break;
 
             try p.parser.indexer.step(read_buf, &p.parser, pos);
@@ -1390,14 +1390,14 @@ pub const Parser = struct {
         if (parser.read_buf_start_pos <= start_pos and start_pos < parser.read_buf_start_pos + parser.read_buf_len) blk: {
             const offset = start_pos - parser.read_buf_start_pos;
             if (offset + len_hint > READ_BUF_CAP) break :blk;
-            return @ptrCast([*]const u8, &parser.read_buf) + offset;
+            return @as([*]const u8, @ptrCast(&parser.read_buf)) + offset;
         }
         // cmn.println("TokenIterator: seek and read()", .{});
         try parser.src.seekTo(start_pos);
         parser.read_buf_start_pos = start_pos;
         // not sure that 0xaa is the best value here but it does prevent false positives like [nul]
         @memset(&parser.read_buf, 0xaa);
-        parser.read_buf_len = @truncate(u16, try parser.src.read(&parser.read_buf));
+        parser.read_buf_len = @as(u16, @truncate(try parser.src.read(&parser.read_buf)));
         return &parser.read_buf;
     }
 };

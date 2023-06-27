@@ -239,7 +239,7 @@ pub const BackslashAndQuote = struct {
         dst[0..BYTES_PROCESSED].* = src_vec;
         const bs = src_vec == @splat(BYTES_PROCESSED, @as(u8, '\\'));
         const qs = src_vec == @splat(BYTES_PROCESSED, @as(u8, '"'));
-        return BackslashAndQuote{ .bs_bits = @ptrCast(*const u32, &bs).*, .quote_bits = @ptrCast(*const u32, &qs).* };
+        return BackslashAndQuote{ .bs_bits = @as(*const u32, @ptrCast(&bs)).*, .quote_bits = @as(*const u32, @ptrCast(&qs)).* };
     }
 
     fn has_quote_first(bsq: BackslashAndQuote) bool {
@@ -428,27 +428,27 @@ pub const CharUtils = struct {
 
     pub inline fn codepoint_to_utf8(cp: u32, c: [*]u8) u3 {
         if (cp <= 0x7F) {
-            c[0] = @truncate(u8, cp);
+            c[0] = @truncate(cp);
             return 1; // ascii
         }
         if (cp <= 0x7FF) {
-            c[0] = @truncate(u8, (cp >> 6) + 192);
-            c[1] = @truncate(u8, (cp & 63) + 128);
+            c[0] = @truncate((cp >> 6) + 192);
+            c[1] = @truncate((cp & 63) + 128);
             return 2; // universal plane
             //  Surrogates are treated elsewhere...
             //} //else if (0xd800 <= cp && cp <= 0xdfff) {
             //  return 0; // surrogates // could put assert here
         } else if (cp <= 0xFFFF) {
-            c[0] = @truncate(u8, (cp >> 12) + 224);
-            c[1] = @truncate(u8, ((cp >> 6) & 63) + 128);
-            c[2] = @truncate(u8, (cp & 63) + 128);
+            c[0] = @truncate((cp >> 12) + 224);
+            c[1] = @truncate(((cp >> 6) & 63) + 128);
+            c[2] = @truncate((cp & 63) + 128);
             return 3;
         } else if (cp <= 0x10FFFF) { // if you know you have a valid code point, this
             // is not needed
-            c[0] = @truncate(u8, (cp >> 18) + 240);
-            c[1] = @truncate(u8, ((cp >> 12) & 63) + 128);
-            c[2] = @truncate(u8, ((cp >> 6) & 63) + 128);
-            c[3] = @truncate(u8, (cp & 63) + 128);
+            c[0] = @truncate((cp >> 18) + 240);
+            c[1] = @truncate(((cp >> 12) & 63) + 128);
+            c[2] = @truncate(((cp >> 6) & 63) + 128);
+            c[3] = @truncate((cp & 63) + 128);
             return 4;
         }
         // will return 0 when the code point was too large.
@@ -498,8 +498,8 @@ pub const CharUtils = struct {
     pub fn full_multiplication(value1: u64, value2: u64) Value128 {
         const r = @as(u128, value1) * value2;
         return .{
-            .low = @truncate(u64, r),
-            .high = @truncate(u64, r >> 64),
+            .low = @truncate(r),
+            .high = @truncate(r >> 64),
         };
     }
 };

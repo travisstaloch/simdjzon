@@ -24,7 +24,7 @@ fn __mm256_permute2x128_si256_0x21(comptime V: type, a: V, b: V) V {
 
 fn _mm256_permute2x128_si256_0x21(a: Chunk, b: Chunk) Chunk {
     const V = if (chunk_len == 32) v.u64x4 else v.u32x4;
-    return @bitCast(Chunk, __mm256_permute2x128_si256_0x21(V, @bitCast(V, a), @bitCast(V, b)));
+    return @bitCast(__mm256_permute2x128_si256_0x21(V, @as(V, @bitCast(a)), @as(V, @bitCast(b))));
 }
 
 fn _mm256_alignr_epi8(a: Chunk, b: Chunk, comptime imm8: comptime_int) Chunk {
@@ -112,22 +112,22 @@ pub fn prefix_xor(bitmask: u64) u64 {
 
     // do a carryless multiply by all 1's
     // adapted from zig/lib/std/crypto/ghash_polyval.zig
-    const x = @bitCast(u128, [2]u64{ bitmask, 0 });
-    const y = @bitCast(u128, @splat(16, @as(u8, 0xff)));
+    const x: u128 = @bitCast([2]u64{ bitmask, 0 });
+    const y: u128 = @bitCast(@splat(16, @as(u8, 0xff)));
 
     return switch (builtin.cpu.arch) {
         .x86_64 => asm (
             \\ vpclmulqdq $0x00, %[x], %[y], %[out]
             : [out] "=x" (-> @Vector(2, u64)),
-            : [x] "x" (@bitCast(@Vector(2, u64), x)),
-              [y] "x" (@bitCast(@Vector(2, u64), y)),
+            : [x] "x" (@as(@Vector(2, u64), @bitCast(x))),
+              [y] "x" (@as(@Vector(2, u64), @bitCast(y))),
         ),
 
         .aarch64 => asm (
             \\ pmull %[out].1q, %[x].1d, %[y].1d
             : [out] "=w" (-> @Vector(2, u64)),
-            : [x] "w" (@bitCast(@Vector(2, u64), x)),
-              [y] "w" (@bitCast(@Vector(2, u64), y)),
+            : [x] "w" (@as(@Vector(2, u64), @bitCast(x))),
+              [y] "w" (@as(@Vector(2, u64), @bitCast(y))),
         ),
 
         else => unreachable,

@@ -62,7 +62,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
     if (!common.debug) return;
 
     var log_fba = std.heap.FixedBufferAllocator.init(&log_buf);
-    const depth_padding = pad_with_alloc("", ' ', @intCast(u8, if (log.depth < 0x0f) log.depth * 2 else 0xff), log_fba.allocator());
+    const depth_padding = pad_with_alloc("", ' ', @as(u8, @intCast(if (log.depth < 0x0f) log.depth * 2 else 0xff)), log_fba.allocator());
     const titles = std.fmt.allocPrint(
         log_fba.allocator(),
         "{s}{s}{s}",

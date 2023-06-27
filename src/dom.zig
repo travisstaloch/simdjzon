@@ -5,7 +5,6 @@ const mem = std.mem;
 const os = std.os;
 const assert = std.debug.assert;
 const v = @import("vector_types.zig");
-// const llvm = @import("llvm_intrinsics.zig");
 const c = @import("c_intrinsics.zig");
 const string_parsing = @import("string_parsing.zig");
 const number_parsing = @import("number_parsing.zig");
@@ -75,7 +74,7 @@ const BitIndexer = struct {
             // cmn.println("", .{});
             return;
         }
-        const reader_pos = @intCast(i32, reader_pos_ - 64); //  this function is always passed last bits so reader_pos will be ahead by 64
+        const reader_pos: i32 = @intCast(reader_pos_ - 64); //  this function is always passed last bits so reader_pos will be ahead by 64
         const cnt = @popCount(bits);
         // cmn.println(", reader_pos {}", .{reader_pos});
         const start_count = indexer.tail.items.len;
@@ -84,7 +83,7 @@ const BitIndexer = struct {
         {
             var new_items = indexer.tail.addManyAsArrayAssumeCapacity(8);
             for (new_items) |*ptr| {
-                ptr.* = @intCast(u32, reader_pos + @ctz(bits));
+                ptr.* = @intCast(reader_pos + @ctz(bits));
                 bits = (bits -% 1) & bits;
                 // std.log.debug("bits {}", .{bits});
             }
@@ -95,7 +94,7 @@ const BitIndexer = struct {
         if (cnt > 8) {
             var new_items = indexer.tail.addManyAsArrayAssumeCapacity(8);
             for (new_items) |*ptr| {
-                ptr.* = @intCast(u32, reader_pos + @ctz(bits));
+                ptr.* = @intCast(reader_pos + @ctz(bits));
                 bits = (bits -% 1) & bits;
             }
         }
@@ -106,7 +105,7 @@ const BitIndexer = struct {
         if (cnt > 16) {
             var i: usize = 16;
             while (true) {
-                indexer.tail.appendAssumeCapacity(@intCast(u32, reader_pos + @ctz(bits)));
+                indexer.tail.appendAssumeCapacity(@intCast(reader_pos + @ctz(bits)));
                 bits = (bits -% 1) & bits;
                 i += 1;
                 if (i >= cnt) break;
@@ -351,19 +350,19 @@ const Utf8Checker = struct {
 
     fn must_be_2_3_continuation(prev2: Chunk, prev3: Chunk) Chunk {
         // do unsigned saturating subtraction, then interpret as signed so we can check if > 0 below
-        const is_third_byte = @bitCast(
+        const is_third_byte = @as(
             IChunk,
-            prev2 -| @splat(chunk_len, @as(u8, 0b11100000 - 1)),
+            @bitCast(prev2 -| @splat(chunk_len, @as(u8, 0b11100000 - 1))),
         ); // Only 111_____ will be > 0
-        const is_fourth_byte = @bitCast(
+        const is_fourth_byte = @as(
             IChunk,
-            prev3 -| @splat(chunk_len, @as(u8, 0b11110000 - 1)),
+            @bitCast(prev3 -| @splat(chunk_len, @as(u8, 0b11110000 - 1))),
         ); // Only 1111____ will be > 0
 
         // Caller requires a bool (all 1's). All values resulting from the subtraction will be <= 64, so signed comparison is fine.
         const i1xchunk_len = @Vector(chunk_len, i1);
-        const result = @bitCast(i1xchunk_len, (is_third_byte | is_fourth_byte) > @splat(chunk_len, @as(i8, 0)));
-        return @bitCast(Chunk, @as(IChunk, result));
+        const result = @as(i1xchunk_len, @bitCast((is_third_byte | is_fourth_byte) > @splat(chunk_len, @as(i8, 0))));
+        return @as(Chunk, @bitCast(@as(IChunk, result)));
     }
 
     //
@@ -393,7 +392,7 @@ const Utf8Checker = struct {
 
         // return llvm.mm256_movemask_epi8(a | b) == 0;
         const x = a | b;
-        return @bitCast(u32, @bitCast(v.u1x32, x != @splat(32, @as(u8, 0)))) == 0;
+        return @as(u32, @bitCast(@as(v.u1x32, @bitCast(x != @splat(32, @as(u8, 0)))))) == 0;
     }
 
     fn check_next_input(checker: *Utf8Checker, input: v.u8x64) void {
@@ -409,14 +408,14 @@ const Utf8Checker = struct {
             // "We support either two or four chunks per 64-byte block.");
             if (cmn.is_x86_64) {
                 const NUM_CHUNKS = 2;
-                const chunks = @bitCast([NUM_CHUNKS][32]u8, input);
+                const chunks = @as([NUM_CHUNKS][32]u8, @bitCast(input));
                 checker.check_utf8_bytes(chunks[0], checker.prev_input_block);
                 checker.check_utf8_bytes(chunks[1], chunks[0]);
                 checker.prev_incomplete = is_incomplete(chunks[NUM_CHUNKS - 1]);
                 checker.prev_input_block = chunks[NUM_CHUNKS - 1];
             } else if (cmn.is_arm64) {
                 const NUM_CHUNKS = 4;
-                const chunks = @bitCast([NUM_CHUNKS][16]u8, input);
+                const chunks = @as([NUM_CHUNKS][16]u8, @bitCast(input));
                 checker.check_utf8_bytes(chunks[0], checker.prev_input_block);
                 checker.check_utf8_bytes(chunks[1], chunks[0]);
                 checker.check_utf8_bytes(chunks[2], chunks[1]);
@@ -505,14 +504,14 @@ const CharacterBlock = struct {
         // hope that useless computations will be omitted. This is namely case when
         // minifying (we only need whitespace).
 
-        const in = @bitCast([64]u8, input_vec);
+        const in = @as([64]u8, @bitCast(input_vec));
         const chunk0: v.u8x32 = in[0..32].*;
         const chunk1: v.u8x32 = in[32..64].*;
         const wss: [2]v.u8x32 = .{
             c.mm256_shuffle_epi8(whitespace_table, chunk0),
             c.mm256_shuffle_epi8(whitespace_table, chunk1),
         };
-        const ws = input_vec == @bitCast(v.u8x64, wss);
+        const ws = input_vec == @as(v.u8x64, @bitCast(wss));
         // Turn [ and ] into { and }
         const curlified = input_vec | @splat(64, @as(u8, 0x20));
         const ops: [2]v.u8x32 = .{
@@ -527,8 +526,8 @@ const CharacterBlock = struct {
         //     }
         //     cmn.println("{s} | CharacterBlock.classify() ops", .{s});
         // }
-        const whitespace = @bitCast(u64, ws);
-        const op = @bitCast(u64, curlified == @bitCast(v.u8x64, ops));
+        const whitespace = @as(u64, @bitCast(ws));
+        const op = @as(u64, @bitCast(curlified == @as(v.u8x64, @bitCast(ops))));
 
         // cmn.println("{b:0>64} | whitespace", .{@bitReverse(whitespace)});
         // cmn.println("{b:0>64} | op", .{@bitReverse(op)});
@@ -546,7 +545,7 @@ const CharacterBlock = struct {
         //  auto shuf_hi = nib_hi.lookup_16<uint8_t>(8, 0, 18, 4, 0, 1, 0, 1, 0, 0, 0, 3, 2, 1, 0, 0);
         //  return shuf_lo & shuf_hi;
         // });
-        const in = @bitCast([64]u8, input_vec);
+        const in = @as([64]u8, @bitCast(input_vec));
         const chunk0: v.u8x16 = in[0..16].*;
         const chunk1: v.u8x16 = in[16..32].*;
         const chunk2: v.u8x16 = in[32..48].*;
@@ -584,7 +583,7 @@ const CharacterBlock = struct {
         // there is a small untaken optimization opportunity here. We deliberately
         // do not pick it up.
 
-        const vchunks = @bitCast([64]u8, vv);
+        const vchunks = @as([64]u8, @bitCast(vv));
         const vchunk0: v.u8x16 = vchunks[0..16].*;
         const vchunk1: v.u8x16 = vchunks[16..32].*;
         const vchunk2: v.u8x16 = vchunks[32..48].*;
@@ -592,21 +591,21 @@ const CharacterBlock = struct {
         const zeros = @splat(16, @as(u8, 0));
         const sevens = @splat(16, @as(u8, 0x7));
         const ops: [4]u16 = .{
-            @bitCast(u16, c.any_bits_set_aarch64(vchunk0, sevens) != zeros),
-            @bitCast(u16, c.any_bits_set_aarch64(vchunk1, sevens) != zeros),
-            @bitCast(u16, c.any_bits_set_aarch64(vchunk2, sevens) != zeros),
-            @bitCast(u16, c.any_bits_set_aarch64(vchunk3, sevens) != zeros),
+            @as(u16, @bitCast(c.any_bits_set_aarch64(vchunk0, sevens) != zeros)),
+            @as(u16, @bitCast(c.any_bits_set_aarch64(vchunk1, sevens) != zeros)),
+            @as(u16, @bitCast(c.any_bits_set_aarch64(vchunk2, sevens) != zeros)),
+            @as(u16, @bitCast(c.any_bits_set_aarch64(vchunk3, sevens) != zeros)),
         };
 
         const ws = @splat(16, @as(u8, 0x18));
         const wss: [4]u16 = .{
-            @bitCast(u16, c.any_bits_set_aarch64(vchunk0, ws) != zeros),
-            @bitCast(u16, c.any_bits_set_aarch64(vchunk1, ws) != zeros),
-            @bitCast(u16, c.any_bits_set_aarch64(vchunk2, ws) != zeros),
-            @bitCast(u16, c.any_bits_set_aarch64(vchunk3, ws) != zeros),
+            @as(u16, @bitCast(c.any_bits_set_aarch64(vchunk0, ws) != zeros)),
+            @as(u16, @bitCast(c.any_bits_set_aarch64(vchunk1, ws) != zeros)),
+            @as(u16, @bitCast(c.any_bits_set_aarch64(vchunk2, ws) != zeros)),
+            @as(u16, @bitCast(c.any_bits_set_aarch64(vchunk3, ws) != zeros)),
         };
-        const whitespace = @bitCast(u64, wss);
-        const op = @bitCast(u64, ops);
+        const whitespace = @as(u64, @bitCast(wss));
+        const op = @as(u64, @bitCast(ops));
         // cmn.println("{b:0>64} | whitespace", .{@bitReverse(whitespace)});
         // cmn.println("{b:0>64} | op", .{@bitReverse(op)});
 
@@ -747,8 +746,8 @@ pub const StructuralIndexer = struct {
         // * ][[ which is invalid.
         // **/
         var new_inds = parser.indexer.bit_indexer.tail.addManyAsArrayAssumeCapacity(3);
-        new_inds[0] = @intCast(u32, len);
-        new_inds[1] = @intCast(u32, len);
+        new_inds[0] = @as(u32, @intCast(len));
+        new_inds[1] = @as(u32, @intCast(len));
         new_inds[2] = 0;
         parser.next_structural_index = 0;
         // a valid JSON file cannot have zero structural indexes - we should have found something
@@ -781,8 +780,8 @@ pub const StructuralIndexer = struct {
         const mask = @splat(32, m);
         const a = chunks[0] <= mask;
         const b = chunks[1] <= mask;
-        const aint = @as(u64, @ptrCast(*const u32, &a).*);
-        const bint = @as(u64, @ptrCast(*const u32, &b).*) << 32;
+        const aint = @as(u64, @as(*const u32, @ptrCast(&a)).*);
+        const bint = @as(u64, @as(*const u32, @ptrCast(&b)).*) << 32;
         return aint | bint;
     }
 
@@ -801,7 +800,7 @@ pub const StructuralIndexer = struct {
 
     fn next(si: *StructuralIndexer, input_vec: v.u8x64, block: Block, reader_pos: u64) !void {
         si.logStructurals(input_vec, block, reader_pos);
-        const chunks = @bitCast([2]v.u8x32, input_vec);
+        const chunks = @as([2]v.u8x32, @bitCast(input_vec));
         const unescaped = lteq(u8, chunks, 0x1F);
         si.checker.check_next_input(input_vec);
         si.bit_indexer.write(reader_pos, si.prev_structurals); // Output *last* iteration's structurals to the parser
@@ -1135,7 +1134,7 @@ pub const TapeBuilder = struct {
     }
 
     pub fn append_double(tb: *TapeBuilder, val: f64) void {
-        tb.append2(0, @bitCast(u64, val), .DOUBLE);
+        tb.append2(0, @as(u64, @bitCast(val)), .DOUBLE);
     }
 
     pub fn append_i64(tb: *TapeBuilder, val: u64) void {
@@ -1153,7 +1152,7 @@ pub const TapeBuilder = struct {
     }
 
     pub fn next_tape_index(tb: TapeBuilder) u32 {
-        return @intCast(u32, tb.tape.items.len);
+        return @as(u32, @intCast(tb.tape.items.len));
     }
 
     pub fn skip(tb: *TapeBuilder) void {
@@ -1176,7 +1175,7 @@ pub const TapeBuilder = struct {
         open_containers.appendAssumeCapacity(.{
             .is_array = is_array,
             .open_container = .{
-                .tape_index = @intCast(u32, tape_idx),
+                .tape_index = @as(u32, @intCast(tape_idx)),
                 .count = count,
             },
         });
@@ -1192,7 +1191,7 @@ pub const TapeBuilder = struct {
         // Write the start tape element, pointing at the end location (and including count)
         // count can overflow if it exceeds 24 bits... so we saturate
         // the convention being that a cnt of 0xffffff or more is undetermined in value (>=  0xffffff).
-        const cntsat: u32 = @min(@intCast(u32, container.count), 0xFFFFFF);
+        const cntsat: u32 = @min(@as(u32, @intCast(container.count)), 0xFFFFFF);
 
         // iter.log.line_fmt(iter, "", "end_container", "next_tape_index {}", .{tb.next_tape_index()});
         tb.write(start_tape_index, tb.next_tape_index() | (@as(u64, cntsat) << 32), start);
@@ -1433,10 +1432,10 @@ pub const Parser = struct {
 
     fn nextStringBlock(parser: *Parser, input_vec: v.u8x64) StringBlock {
         const backslash_vec = input_vec == @splat(64, @as(u8, '\\'));
-        const backslash = @bitCast(u64, backslash_vec);
+        const backslash = @as(u64, @bitCast(backslash_vec));
         const escaped = parser.find_escaped(backslash);
         const quote_vec = input_vec == @splat(64, @as(u8, '"'));
-        const quote = @bitCast(u64, quote_vec) & ~escaped;
+        const quote = @as(u64, @bitCast(quote_vec)) & ~escaped;
 
         //
         // prefix_xor flips on bits inside the string (and flips off the end quote).
@@ -1463,7 +1462,7 @@ pub const Parser = struct {
         // cmn.println("{b:0>64} | @bitCast(i64, in_string) ", .{@bitReverse(i64, @bitCast(i64, in_string))});
         // cmn.println("{b:0>64} | @bitCast(i64, in_string) >> 63 ", .{@bitReverse(i64, @bitCast(i64, in_string) >> 63)});
         // cmn.println("{b:0>64} | @bitCast(u64, @bitCast(i64, in_string) >> 63) ", .{@bitReverse(@bitCast(u64, @bitCast(i64, in_string) >> 63))});
-        parser.prev_in_string = @bitCast(u64, @bitCast(i64, in_string) >> 63);
+        parser.prev_in_string = @as(u64, @bitCast(@as(i64, @bitCast(in_string)) >> 63));
 
         // Use ^ to turn the beginning quote off, and the end quote on.
 
@@ -1680,7 +1679,7 @@ const TapeRef = struct {
         };
     }
     pub fn matching_brace_idx(tr: TapeRef) u32 {
-        const result = @truncate(u32, tr.current());
+        const result = @as(u32, @truncate(tr.current()));
         // std.log.debug("TapeRef matching_brace_idx() for {} {}", .{ tr.tape_ref_type(), result });
         return result;
     }
@@ -1689,7 +1688,7 @@ const TapeRef = struct {
         return tr.doc.tape.items[tr.idx];
     }
     pub fn scope_count(tr: TapeRef) u32 {
-        return @truncate(u32, (tr.current() >> 32) & TapeType.count_mask);
+        return @as(u32, @truncate((tr.current() >> 32) & TapeType.count_mask));
     }
 
     pub fn get_string_length(tr: TapeRef) u32 {
@@ -1698,17 +1697,17 @@ const TapeRef = struct {
     }
 
     pub fn get_c_str(tr: TapeRef) [*:0]u8 {
-        return @ptrCast([*:0]u8, tr.doc.string_buf.ptr + tr.value() + @sizeOf(u32));
+        return @as([*:0]u8, @ptrCast(tr.doc.string_buf.ptr + tr.value() + @sizeOf(u32)));
     }
 
     pub fn get_as_type(tr: TapeRef, comptime T: type) T {
         comptime assert(@sizeOf(T) == @sizeOf(u64));
-        return @bitCast(T, tr.current());
+        return @as(T, @bitCast(tr.current()));
     }
 
     pub fn get_next_as_type(tr: TapeRef, comptime T: type) T {
         comptime assert(@sizeOf(T) == @sizeOf(u64));
-        return @bitCast(T, tr.doc.tape.items[tr.idx + 1]);
+        return @as(T, @bitCast(tr.doc.tape.items[tr.idx + 1]));
     }
 
     pub fn get_string(tr: TapeRef) []u8 {
@@ -1830,7 +1829,7 @@ const Element = struct {
                                 ele.get_int64()
                             else
                                 ele.get_uint64()) orelse return error.Overflow,
-                            .Float => out.* = @floatCast(C, try ele.get_double()),
+                            .Float => out.* = @as(C, @floatCast(try ele.get_double())),
                             .Bool => out.* = try ele.get_bool(),
                             .Optional => out.* = if (ele.is(.NULL))
                                 null
@@ -1878,7 +1877,7 @@ const Element = struct {
                                 const string = ele.get_string() catch unreachable;
                                 const len = @min(string.len, out.len * @sizeOf(C));
                                 @memcpy(
-                                    @ptrCast([*]u8, out.ptr)[0..len],
+                                    @as([*]u8, @ptrCast(out.ptr))[0..len],
                                     string.ptr[0..len],
                                 );
                             },
@@ -1929,7 +1928,7 @@ const Element = struct {
                 break :blk if (result > std.math.maxInt(i64))
                     error.NUMBER_OUT_OF_RANGE
                 else
-                    @bitCast(i64, result);
+                    @as(i64, @bitCast(result));
             } else error.INCORRECT_TYPE
         else
             ele.next_tape_value(i64);
@@ -1941,7 +1940,7 @@ const Element = struct {
                 break :blk if (result < 0)
                     error.NUMBER_OUT_OF_RANGE
                 else
-                    @bitCast(u64, result);
+                    @as(u64, @bitCast(result));
             } else error.INCORRECT_TYPE
         else
             ele.next_tape_value(u64);
@@ -1969,7 +1968,7 @@ const Element = struct {
     }
     pub fn next_tape_value(ele: Element, comptime T: type) T {
         comptime assert(@sizeOf(T) == @sizeOf(u64));
-        return mem.readIntLittle(T, @ptrCast([*]const u8, ele.tape.doc.tape.items.ptr + ele.tape.idx + 1)[0..8]);
+        return mem.readIntLittle(T, @as([*]const u8, @ptrCast(ele.tape.doc.tape.items.ptr + ele.tape.idx + 1))[0..8]);
     }
     pub fn as_tape_type(ele: Element, comptime tape_type: TapeType) !Value {
         return switch (tape_type) {

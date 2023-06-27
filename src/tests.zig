@@ -54,7 +54,7 @@ test "tape build 1" {
     try parser.parse();
 
     // verify doc.string_buf
-    var p = @ptrCast([*:0]u8, parser.doc.string_buf.ptr);
+    var p: [*:0]u8 = @ptrCast(parser.doc.string_buf.ptr);
     var j: u8 = 0;
     const expected_strings: []const []const u8 = &.{
         "Width",   "Height",    "Title", "View from my room",    "Url",    "http://ex.com/img.png",
@@ -66,7 +66,7 @@ test "tape build 1" {
         p += 4;
         const str = std.mem.span(p);
         cmn.println("{}:{}-'{s}' '{s}'", .{ j, len, str, p[0..10] });
-        try testing.expectEqual(@intCast(u32, str.len), len);
+        try testing.expectEqual(@as(u32, @intCast(str.len)), len);
         try testing.expectEqualStrings(expected_strings[j], str);
         p += str.len + 1;
     }
@@ -117,7 +117,7 @@ test "float" {
         );
         try testing.expectApproxEqAbs(
             @as(f64, 123.456),
-            @bitCast(f64, parser.doc.tape.items[2]),
+            @as(f64, @bitCast(parser.doc.tape.items[2])),
             0.000000001,
         );
         const ele = parser.element();
@@ -136,7 +136,7 @@ test "float" {
         );
         try testing.expectApproxEqAbs(
             @as(f64, 0.000000000000000000000000000000000000000000000000000000000000000000000000000001),
-            @bitCast(f64, parser.doc.tape.items[3]),
+            @as(f64, @bitCast(parser.doc.tape.items[3])),
             std.math.floatEps(f64),
         );
         try testing.expectEqual(
@@ -145,7 +145,7 @@ test "float" {
         );
         try testing.expectApproxEqAbs(
             @as(f64, 0.1),
-            @bitCast(f64, parser.doc.tape.items[5]),
+            @as(f64, @bitCast(parser.doc.tape.items[5])),
             std.math.floatEps(f64),
         );
         try testing.expectEqual(
@@ -154,7 +154,7 @@ test "float" {
         );
         try testing.expectApproxEqAbs(
             @as(f64, 0.01),
-            @bitCast(f64, parser.doc.tape.items[7]),
+            @as(f64, @bitCast(parser.doc.tape.items[7])),
             std.math.floatEps(f64),
         );
     }
@@ -232,7 +232,7 @@ test "json pointer" {
         // this contrived example shows you can read string data into slice types other than u8
         var s = [1]u16{mem.readIntLittle(u16, "xx")} ** 4;
         try (try parser.element().at_pointer("/a/e")).get(s[0..2]);
-        const expected_u16s = @bitCast([4]u16, expected);
+        const expected_u16s: [4]u16 = @bitCast(expected);
         try testing.expectEqualSlices(u16, &expected_u16s, &s);
     }
     var opt: ?u8 = undefined;
@@ -300,7 +300,7 @@ test "get_alloc integer slice" {
 
     try std.testing.expectEqual(@as(usize, 3), s.len);
     for (s, 0..) |item, i| {
-        try std.testing.expectEqual(@intCast(u8, i), item);
+        try std.testing.expectEqual(@as(u8, @intCast(i)), item);
     }
 }
 
@@ -544,7 +544,7 @@ test "ondemand array iteration nested 1" {
                 while (try it.next()) |e2_| {
                     var e2 = e2_;
                     try testing.expectApproxEqAbs(
-                        @floatFromInt(f64, i + 1),
+                        @as(f64, @floatFromInt(i + 1)),
                         try e2.get_double(),
                         std.math.floatEps(f64),
                     );
