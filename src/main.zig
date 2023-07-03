@@ -55,7 +55,7 @@ pub fn ondemandMain(allocator: std.mem.Allocator, args: Args) !u8 {
     var doc = try parser.iterate();
     var string_buf: [0x1000]u8 = undefined;
     var end_index: u32 = 0;
-    recursive_iterate_json(&doc, .doc, 1, parser.parser.max_depth, &string_buf, &end_index) catch |err| switch (err) {
+    recursive_iterate_json(&doc, 1, parser.parser.max_depth, &string_buf, &end_index) catch |err| switch (err) {
         else => {
             std.log.err("{s}:{} parse failed. {s}", .{ parser.parser.filename, end_index, @errorName(err) });
             return 1;
@@ -69,19 +69,20 @@ pub fn ondemandMain(allocator: std.mem.Allocator, args: Args) !u8 {
     return 0;
 }
 
-fn recursive_iterate_json(element_: anytype, comptime ele_type: enum { doc, value }, depth: u16, max_depth: u16, string_buf: []u8, end_index: *u32) common.Error!void {
+fn recursive_iterate_json(element_: anytype, depth: u16, max_depth: u16, string_buf: []u8, end_index: *u32) common.Error!void {
     if (depth >= max_depth) return error.DEPTH_ERROR;
-    var iter = switch (ele_type) {
-        .doc => element_.iter,
-        .value => element_.iter.iter,
-    };
     var element = element_.*;
+    var iter = switch (@TypeOf(element)) {
+        ondemand.Document => element_.iter,
+        ondemand.Value => element_.iter.iter,
+        else => unreachable,
+    };
     switch (try element.get_type()) {
         .array => {
             var arr = try element.get_array();
             var it = arr.iterator();
             while (try it.next()) |*child| {
-                try recursive_iterate_json(child, .value, depth + 1, max_depth, string_buf, end_index);
+                try recursive_iterate_json(child, depth + 1, max_depth, string_buf, end_index);
             }
             end_index.* = (it.iter.iter.token.index - 1)[0];
             return;
@@ -91,7 +92,7 @@ fn recursive_iterate_json(element_: anytype, comptime ele_type: enum { doc, valu
             var it = obj.iterator();
             var key: [0x1000]u8 = undefined;
             while (try it.next(&key)) |*field| {
-                try recursive_iterate_json(&field.value, .value, depth + 1, max_depth, string_buf, end_index);
+                try recursive_iterate_json(&field.value, depth + 1, max_depth, string_buf, end_index);
             }
             end_index.* = (it.iter.iter.token.index - 1)[0];
             return;
