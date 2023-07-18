@@ -170,8 +170,8 @@ const Utf8Checker = struct {
                                         // 1111011_ 1000____
                                         // 11111___ 1000____
         const OVERLONG_4: u8 = 1 << 6;  // 11110000 1000____
-
-        const byte_1_high_0 = prev1 >> @splat(32, @as(u3, 4));
+        const u3x32 = @Vector(32, u3);
+        const byte_1_high_0 = prev1 >> @as(u3x32,@splat(4));
         const tbl1 = [16]u8{
             // 0_______ ________ <ASCII in byte 1>
             TOO_LONG,               TOO_LONG,  TOO_LONG,                           TOO_LONG,
@@ -189,7 +189,7 @@ const Utf8Checker = struct {
         } ** 2;
         const byte_1_high = c.mm256_shuffle_epi8(tbl1, byte_1_high_0);
         const CARRY: u8 = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
-        const byte_1_low0 = prev1 & @splat(32, @as(u8, 0x0F));
+        const byte_1_low0 = prev1 & @as(v.u8x32, @splat(0x0F));
         
         const tbl2 = [16]u8{
             // ____0000 ________
@@ -221,7 +221,7 @@ const Utf8Checker = struct {
         } ** 2;
         const byte_1_low = c.mm256_shuffle_epi8(tbl2, byte_1_low0);
 
-        const byte_2_high_0 = input >> @splat(32, @as(u3, 4));
+        const byte_2_high_0 = input >> @as(u3x32, @splat(4));
         const tbl3 = [16]u8{
             // ________ 0_______ <ASCII in byte 2>
             TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
@@ -268,7 +268,8 @@ const Utf8Checker = struct {
                                         // 11111___ 1000____
         const OVERLONG_4: u8 = 1 << 6;  // 11110000 1000____
 
-        const byte_1_high_0 = prev1 >> @splat(chunk_len, @as(u3, 4));
+        const u3xchunk_len = @Vector(u3, chunk_len);
+        const byte_1_high_0 = prev1 >> @as(u3xchunk_len, @splat(4));
         const tbl1 = [16]u8{
             // 0_______ ________ <ASCII in byte 1>
             TOO_LONG,               TOO_LONG,  TOO_LONG,                           TOO_LONG,
@@ -287,7 +288,7 @@ const Utf8Checker = struct {
 
         const byte_1_high = c.lookup_16_aarch64(byte_1_high_0, tbl1); 
         const CARRY: u8 = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
-        const byte_1_low0 = prev1 & @splat(chunk_len, @as(u8, 0x0F));
+        const byte_1_low0 = prev1 & @as(Chunk, @splat(0x0F));
         
         const tbl2 = [16]u8{
             // ____0000 ________
@@ -320,7 +321,7 @@ const Utf8Checker = struct {
         // const byte_1_low = c.mm256_shuffle_epi8(tbl2, byte_1_low0);
         const byte_1_low = c.lookup_16_aarch64(byte_1_low0, tbl2);
 
-        const byte_2_high_0 = input >> @splat(chunk_len, @as(u3, 4));
+        const byte_2_high_0 = input >> @as(u3xchunk_len, @splat(4));
         const tbl3 = [16]u8{
             // ________ 0_______ <ASCII in byte 2>
             TOO_SHORT, TOO_SHORT, TOO_SHORT, TOO_SHORT,
@@ -344,7 +345,7 @@ const Utf8Checker = struct {
         const prev3 = prev(3, input, prev_input);
         const must23 = must_be_2_3_continuation(prev2, prev3);
         // cmn.println("\nprev2 {}\nprev3 {}\nmust23 {}", .{ prev2, prev3, must23 });
-        const must23_80 = must23 & @splat(chunk_len, @as(u8, 0x80));
+        const must23_80 = must23 & @as(Chunk, @splat(0x80));
         return must23_80 ^ sc;
     }
 
@@ -352,16 +353,16 @@ const Utf8Checker = struct {
         // do unsigned saturating subtraction, then interpret as signed so we can check if > 0 below
         const is_third_byte = @as(
             IChunk,
-            @bitCast(prev2 -| @splat(chunk_len, @as(u8, 0b11100000 - 1))),
+            @bitCast(prev2 -| @as(Chunk, @splat(0b11100000 - 1))),
         ); // Only 111_____ will be > 0
         const is_fourth_byte = @as(
             IChunk,
-            @bitCast(prev3 -| @splat(chunk_len, @as(u8, 0b11110000 - 1))),
+            @bitCast(prev3 -| @as(Chunk, @splat(0b11110000 - 1))),
         ); // Only 1111____ will be > 0
 
         // Caller requires a bool (all 1's). All values resulting from the subtraction will be <= 64, so signed comparison is fine.
         const i1xchunk_len = @Vector(chunk_len, i1);
-        const result = @as(i1xchunk_len, @bitCast((is_third_byte | is_fourth_byte) > @splat(chunk_len, @as(i8, 0))));
+        const result = @as(i1xchunk_len, @bitCast((is_third_byte | is_fourth_byte) > @as(@Vector(chunk_len, i8), @splat(0))));
         return @as(Chunk, @bitCast(@as(IChunk, result)));
     }
 
@@ -392,7 +393,7 @@ const Utf8Checker = struct {
 
         // return llvm.mm256_movemask_epi8(a | b) == 0;
         const x = a | b;
-        return @as(u32, @bitCast(@as(v.u1x32, @bitCast(x != @splat(32, @as(u8, 0)))))) == 0;
+        return @as(u32, @bitCast(@as(v.u1x32, @bitCast(x != @as(v.u8x32, @splat(0)))))) == 0;
     }
 
     fn check_next_input(checker: *Utf8Checker, input: v.u8x64) void {
@@ -444,7 +445,7 @@ const Utf8Checker = struct {
             255, 255, 255, 255, 255, 255,            255,            255,
             255, 255, 255, 255, 255, 0b11110000 - 1, 0b11100000 - 1, 0b11000000 - 1,
         };
-        const max_value = @splat(chunk_len, max_array[@sizeOf(@TypeOf(max_array)) - @sizeOf(v.u8x32)]);
+        const max_value = @as(Chunk, @splat(max_array[@sizeOf(@TypeOf(max_array)) - @sizeOf(v.u8x32)]));
         return input -| max_value;
     }
 };
@@ -513,7 +514,7 @@ const CharacterBlock = struct {
         };
         const ws = input_vec == @as(v.u8x64, @bitCast(wss));
         // Turn [ and ] into { and }
-        const curlified = input_vec | @splat(64, @as(u8, 0x20));
+        const curlified = input_vec | @as(v.u8x64, @splat(0x20));
         const ops: [2]v.u8x32 = .{
             c.mm256_shuffle_epi8(op_table, chunk0),
             c.mm256_shuffle_epi8(op_table, chunk1),
@@ -550,8 +551,8 @@ const CharacterBlock = struct {
         const chunk1: v.u8x16 = in[16..32].*;
         const chunk2: v.u8x16 = in[32..48].*;
         const chunk3: v.u8x16 = in[48..].*;
-        const lo = @splat(16, @as(u8, 0xf));
-        const fours = @splat(16, @as(u3, 4));
+        const lo = @as(v.u8x16, @splat(0xf));
+        const fours = @as(@Vector(16, u3), @splat(4));
 
         const tables: [2]v.u8x16 = .{
             .{ 16, 0, 0, 0, 0, 0, 0, 0, 0, 8, 12, 1, 2, 9, 0, 0 },
@@ -588,8 +589,8 @@ const CharacterBlock = struct {
         const vchunk1: v.u8x16 = vchunks[16..32].*;
         const vchunk2: v.u8x16 = vchunks[32..48].*;
         const vchunk3: v.u8x16 = vchunks[48..].*;
-        const zeros = @splat(16, @as(u8, 0));
-        const sevens = @splat(16, @as(u8, 0x7));
+        const zeros = @as(v.u8x16, @splat(0));
+        const sevens = @as(v.u8x16, @splat(0x7));
         const ops: [4]u16 = .{
             @as(u16, @bitCast(c.any_bits_set_aarch64(vchunk0, sevens) != zeros)),
             @as(u16, @bitCast(c.any_bits_set_aarch64(vchunk1, sevens) != zeros)),
@@ -597,7 +598,7 @@ const CharacterBlock = struct {
             @as(u16, @bitCast(c.any_bits_set_aarch64(vchunk3, sevens) != zeros)),
         };
 
-        const ws = @splat(16, @as(u8, 0x18));
+        const ws = @as(v.u8x16, @splat(0x18));
         const wss: [4]u16 = .{
             @as(u16, @bitCast(c.any_bits_set_aarch64(vchunk0, ws) != zeros)),
             @as(u16, @bitCast(c.any_bits_set_aarch64(vchunk1, ws) != zeros)),
@@ -777,7 +778,7 @@ pub const StructuralIndexer = struct {
     }
 
     fn lteq(comptime T: type, chunks: [2]v.u8x32, m: T) u64 {
-        const mask = @splat(32, m);
+        const mask: @Vector(32, T) = @splat(m);
         const a = chunks[0] <= mask;
         const b = chunks[1] <= mask;
         const aint = @as(u64, @as(*const u32, @ptrCast(&a)).*);
@@ -1431,10 +1432,10 @@ pub const Parser = struct {
     }
 
     fn nextStringBlock(parser: *Parser, input_vec: v.u8x64) StringBlock {
-        const backslash_vec = input_vec == @splat(64, @as(u8, '\\'));
+        const backslash_vec = input_vec == @as(v.u8x64, @splat('\\'));
         const backslash = @as(u64, @bitCast(backslash_vec));
         const escaped = parser.find_escaped(backslash);
-        const quote_vec = input_vec == @splat(64, @as(u8, '"'));
+        const quote_vec = input_vec == @as(v.u8x64, @splat('"'));
         const quote = @as(u64, @bitCast(quote_vec)) & ~escaped;
 
         //

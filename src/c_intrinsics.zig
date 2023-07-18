@@ -113,7 +113,7 @@ pub fn prefix_xor(bitmask: u64) u64 {
     // do a carryless multiply by all 1's
     // adapted from zig/lib/std/crypto/ghash_polyval.zig
     const x: u128 = @bitCast([2]u64{ bitmask, 0 });
-    const y: u128 = @bitCast(@splat(16, @as(u8, 0xff)));
+    const y: u128 = @bitCast(@as(v.u8x16, @splat(0xff)));
 
     return switch (builtin.cpu.arch) {
         .x86_64 => asm (

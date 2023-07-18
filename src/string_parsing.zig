@@ -237,8 +237,8 @@ pub const BackslashAndQuote = struct {
         // VMOVDQU
         // _mm256_storeu_si256(dst, v);
         dst[0..BYTES_PROCESSED].* = src_vec;
-        const bs = src_vec == @splat(BYTES_PROCESSED, @as(u8, '\\'));
-        const qs = src_vec == @splat(BYTES_PROCESSED, @as(u8, '"'));
+        const bs = src_vec == @as(v.u8x32, @splat('\\'));
+        const qs = src_vec == @as(v.u8x32, @splat('"'));
         return BackslashAndQuote{ .bs_bits = @as(*const u32, @ptrCast(&bs)).*, .quote_bits = @as(*const u32, @ptrCast(&qs)).* };
     }
 
