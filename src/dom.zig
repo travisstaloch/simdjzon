@@ -390,10 +390,9 @@ const Utf8Checker = struct {
         const bytes: [64]u8 = input;
         const a: v.u8x32 = bytes[0..32].*;
         const b: v.u8x32 = bytes[32..64].*;
-
-        // return llvm.mm256_movemask_epi8(a | b) == 0;
-        const x = a | b;
-        return @as(u32, @bitCast(@as(v.u1x32, @bitCast(x != @as(v.u8x32, @splat(0)))))) == 0;
+        const non_ascii_mask: v.u8x32 = @splat(0x80);
+        const mask: u32 = @bitCast((a | b) >= non_ascii_mask);
+        return mask == 0;
     }
 
     fn check_next_input(checker: *Utf8Checker, input: v.u8x64) void {
