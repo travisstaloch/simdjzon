@@ -22,10 +22,17 @@ pub fn build(b: *std.build.Builder) void {
         "the capacity of the ondemand read buffer. defaults to 4096 (4 Kb)",
     ) orelse 4096;
 
+    const log_level = b.option(
+        std.log.Level,
+        "log-level",
+        "The log level for the application. default .err",
+    ) orelse .err;
+
     const options = b.addOptions();
     options.addOption(bool, "step_128", step_128);
     options.addOption(bool, "ondemand", ondemand);
     options.addOption(u16, "ondemand_read_cap", ondemand_read_cap);
+    options.addOption(std.log.Level, "log_level", log_level);
 
     const lib = b.addStaticLibrary(.{
         .name = "simdjzon",
