@@ -438,13 +438,13 @@ const Utf8Checker = struct {
     fn is_incomplete(input: Chunk) Chunk {
         // If the previous input's last 3 bytes match this, they're too short (they ended at EOF):
         // ... 1111____ 111_____ 11______
-        const max_array: [32]u8 = .{
-            255, 255, 255, 255, 255, 255,            255,            255,
-            255, 255, 255, 255, 255, 255,            255,            255,
-            255, 255, 255, 255, 255, 255,            255,            255,
-            255, 255, 255, 255, 255, 0b11110000 - 1, 0b11100000 - 1, 0b11000000 - 1,
+        const max_value = comptime max_value: {
+            var max_array: Chunk = @splat(255);
+            max_array[chunk_len - 3] = 0b11110000 - 1;
+            max_array[chunk_len - 2] = 0b11100000 - 1;
+            max_array[chunk_len - 1] = 0b11000000 - 1;
+            break :max_value max_array;
         };
-        const max_value = @as(Chunk, @splat(max_array[@sizeOf(@TypeOf(max_array)) - @sizeOf(v.u8x32)]));
         return input -| max_value;
     }
 };
