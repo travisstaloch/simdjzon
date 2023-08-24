@@ -387,7 +387,7 @@ const Utf8Checker = struct {
     }
 
     fn is_ascii(input: v.u8x64) bool {
-        return 0 == @as(u64, @bitCast(input >= @as(u8x64, @splat(0x80))));
+        return 0 == @as(u64, @bitCast(input >= @as(v.u8x64, @splat(0x80))));
     }
 
     fn check_next_input(checker: *Utf8Checker, input: v.u8x64) void {
