@@ -1646,14 +1646,14 @@ const ElementType = enum(u8) {
 };
 
 const Value = union(ElementType) {
-    NULL,
-    BOOL: bool,
+    ARRAY: Array,
+    OBJECT: Object,
     INT64: i64,
     UINT64: u64,
     DOUBLE: f64,
     STRING: []u8,
-    ARRAY: Array,
-    OBJECT: Object,
+    BOOL: bool,
+    NULL,
 };
 const TapeRef = struct {
     doc: *const Document,
