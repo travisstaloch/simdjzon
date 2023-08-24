@@ -13,18 +13,15 @@ const half_chunk_len = chunk_len / 2;
 // rid of old utils.c and stop linking libc.
 // ---
 
-fn __mm256_permute2x128_si256_0x21(comptime V: type, a: V, b: V) V {
-    var ret: V = undefined;
-    ret[0] = a[2];
-    ret[1] = a[3];
-    ret[2] = b[0];
-    ret[3] = b[1];
-    return ret;
-}
-
 fn _mm256_permute2x128_si256_0x21(a: Chunk, b: Chunk) Chunk {
-    const V = if (chunk_len == 32) v.u64x4 else v.u32x4;
-    return @bitCast(__mm256_permute2x128_si256_0x21(V, @as(V, @bitCast(a)), @as(V, @bitCast(b))));
+    const uint = std.meta.Int(.unsigned, @bitSizeOf(Chunk) / 4);
+    const V = @Vector(4, uint);
+    return @bitCast(@shuffle(
+        uint,
+        @as(V, @bitCast(a)),
+        @as(V, @bitCast(b)),
+        [_]i32{ 2, 3, -1, -2 },
+    ));
 }
 
 fn _mm256_alignr_epi8(a: Chunk, b: Chunk, comptime imm8: comptime_int) Chunk {
