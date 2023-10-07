@@ -258,7 +258,7 @@ test "get with slice/array" {
 // README tests
 // ------------
 
-// const dom = @import("dom.zig");
+// const dom = @import("simdjzon").dom;
 test "get with struct" {
     const S = struct { a: u8, b: []const u8, c: struct { d: u8 } };
     const input =
@@ -348,6 +348,26 @@ test "get_alloc struct field slice more field types" {
     }
 }
 
+test "user defined jsonParse()" {
+    const input =
+        \\{ "foo": "bar"}
+    ;
+    const T = struct {
+        foo: []const u8,
+        pub fn jsonParse(ele: dom.Element, args: anytype) !void {
+            _ = ele;
+            var out = args[0];
+            out.foo = "foo";
+        }
+    };
+    var parser = try dom.Parser.initFixedBuffer(allr, input, .{});
+    defer parser.deinit();
+    try parser.parse();
+    var s: T = undefined;
+    try parser.element().get(&s);
+    try testing.expectEqualStrings("foo", s.foo);
+}
+
 test "get_alloc slice of struct" {
     const S = struct { a: u8, b: []const u8 };
     const T = []S;
@@ -372,7 +392,7 @@ test "get_alloc slice of struct" {
     }
 }
 
-// const ondemand = @import("ondemand.zig");
+// const ondemand = simdjzon.ondemand;
 test "ondemand get with struct" {
     const S = struct { a: struct { b: []const u8 } };
     const input =

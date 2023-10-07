@@ -1746,7 +1746,9 @@ const TapeRefIterator = struct {
         return .{ .tape = tri.tape };
     }
 };
-const Element = struct {
+
+/// this is public to allow for custom jsonParse() methods
+pub const Element = struct {
     tape: TapeRef,
 
     pub fn at_pointer(ele: Element, json_pointer: []const u8) cmn.Error!Element {
@@ -1767,13 +1769,13 @@ const Element = struct {
 
     /// parse from 'ele' into 'out' pointer
     pub fn get(ele: Element, out: anytype) cmn.Error!void {
-        return ele.getImpl(.{ out, null });
+        return ele.jsonParse(.{ out, null });
     }
 
     /// parse from 'ele' into 'out' pointer.
     /// to be used inplace of get() when 'out' contains non-string slice types.
     pub fn get_alloc(ele: Element, allocator: mem.Allocator, out: anytype) cmn.Error!void {
-        return ele.getImpl(.{ out, allocator });
+        return ele.jsonParse(.{ out, allocator });
     }
 
     fn readSlice(
@@ -1801,7 +1803,7 @@ const Element = struct {
             var out_ele: Cchild = undefined;
             const idx = it.tape.after_element();
             // std.debug.print("next_element={}:{}\n", .{ idx, TapeType.from_u64(it.tape.doc.tape.items[idx]) });
-            try arr_ele.getImpl(.{ &out_ele, args[1] });
+            try arr_ele.jsonParse(.{ &out_ele, args[1] });
             try elems.append(out_ele);
             it.tape.idx = idx;
             if (it.tape.idx >= it.end_idx) break;
@@ -1809,13 +1811,17 @@ const Element = struct {
         out.* = try elems.toOwnedSlice();
     }
 
-    fn getImpl(ele: Element, args: anytype) cmn.Error!void {
+    /// this being public allows for custom jsonParse() methods to call back into this method.
+    pub fn jsonParse(ele: Element, args: anytype) cmn.Error!void {
         const out = args[0];
         const T = @TypeOf(out);
         const info = @typeInfo(T);
         switch (info) {
             .Pointer => {
                 const C = std.meta.Child(T);
+                if (comptime std.meta.trait.hasFn("jsonParse")(C))
+                    return C.jsonParse(ele, args);
+
                 const child_info = @typeInfo(C);
                 switch (info.Pointer.size) {
                     .One => {
@@ -1830,17 +1836,17 @@ const Element = struct {
                                 null
                             else blk: {
                                 var x: std.meta.Child(C) = undefined;
-                                try ele.getImpl(.{ &x, args[1] });
+                                try ele.jsonParse(.{ &x, args[1] });
                                 break :blk x;
                             },
-                            .Array => try ele.getImpl(.{ @as([]std.meta.Child(C), out), args[1] }),
+                            .Array => try ele.jsonParse(.{ @as([]std.meta.Child(C), out), args[1] }),
                             .Struct => {
                                 switch (ele.tape.tape_ref_type()) {
                                     .START_OBJECT => {
                                         var obj = ele.get_object() catch unreachable;
                                         inline for (std.meta.fields(C)) |field| {
                                             if (obj.at_key(field.name)) |obj_ele|
-                                                try obj_ele.getImpl(.{ &@field(out, field.name), args[1] });
+                                                try obj_ele.jsonParse(.{ &@field(out, field.name), args[1] });
                                         }
                                     },
                                     else => return error.INCORRECT_TYPE,
@@ -1881,7 +1887,7 @@ const Element = struct {
                                 var it = TapeRefIterator.init(arr);
                                 for (out) |*out_ele| {
                                     const arr_ele = Element{ .tape = it.tape };
-                                    try arr_ele.getImpl(.{ out_ele, args[1] });
+                                    try arr_ele.jsonParse(.{ out_ele, args[1] });
                                     _ = it.next() orelse break;
                                 }
                             },
