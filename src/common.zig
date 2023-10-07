@@ -13,7 +13,10 @@ pub const u8xstep_size = std.meta.Vector(STEP_SIZE, u8);
 pub const STREAMING = false;
 pub const SIMDJSON_PADDING = 32;
 
-pub const log_level: std.log.Level = std.enums.nameCast(std.log.Level, @import("build_options").log_level);
+pub const log_level: std.log.Level = std.enums.nameCast(std.log.Level, if (@hasDecl(root, "build_options"))
+    root.build_options.log_level
+else
+    @import("build_options").log_level);
 pub var debug = log_level == .debug;
 pub fn println(comptime fmt: []const u8, args: anytype) void {
     print(fmt ++ "\n", args);

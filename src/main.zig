@@ -1,9 +1,9 @@
-const build_options = @import("build_options");
 const std = @import("std");
 
 const os = std.os;
-const common = @import("common.zig");
-const simdjzon = @import("simdjzon.zig");
+const simdjzon = @import("simdjzon");
+pub const build_options = simdjzon.build_options;
+const common = simdjzon.common;
 const dom = simdjzon.dom;
 const ondemand = simdjzon.ondemand;
 pub const step_size = if (build_options.step_128) 128 else 64;

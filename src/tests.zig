@@ -3,10 +3,10 @@ const testing = std.testing;
 const mem = std.mem;
 
 const TapeType = dom.TapeType;
-const simdjzon = @import("simdjzon.zig");
+const simdjzon = @import("simdjzon");
 const dom = simdjzon.dom;
 const ondemand = simdjzon.ondemand;
-const cmn = @import("common.zig");
+const cmn = simdjzon.common;
 
 const allr = testing.allocator;
 test "tape build 1" {

@@ -1,5 +1,4 @@
 const std = @import("std");
-const Iterator = @import("main.zig").Iterator;
 const atom_rue = std.mem.readIntLittle(u24, "rue");
 const atom_alse = std.mem.readIntLittle(u32, "alse");
 const atom_ull = std.mem.readIntLittle(u24, "ull");

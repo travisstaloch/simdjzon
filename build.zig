@@ -33,22 +33,21 @@ pub fn build(b: *std.build.Builder) void {
     options.addOption(bool, "ondemand", ondemand);
     options.addOption(u16, "ondemand_read_cap", ondemand_read_cap);
     options.addOption(std.log.Level, "log_level", log_level);
+    const options_mod = options.createModule();
 
-    const lib = b.addStaticLibrary(.{
-        .name = "simdjzon",
-        .root_source_file = .{ .path = "src/simdjzon.zig" },
-        .target = target,
-        .optimize = optimize,
+    const mod = b.addModule("simdjzon", .{
+        .source_file = .{ .path = "src/simdjzon.zig" },
+        .dependencies = &.{
+            .{ .name = "build_options", .module = options_mod },
+        },
     });
-    lib.addOptions("build_options", options);
-    b.installArtifact(lib);
 
     var main_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/tests.zig" },
         .target = target,
         .optimize = optimize,
     });
-    main_tests.addOptions("build_options", options);
+    main_tests.addModule("simdjzon", mod);
     // main_tests.setFilter("tape build 1");
 
     const test_step = b.step("test", "Run tests");
@@ -62,7 +61,7 @@ pub fn build(b: *std.build.Builder) void {
         .target = target,
         .optimize = optimize,
     });
-    exe.addOptions("build_options", options);
+    exe.addModule("simdjzon", mod);
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);

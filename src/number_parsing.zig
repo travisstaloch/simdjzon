@@ -1,6 +1,5 @@
 const std = @import("std");
 const mem = std.mem;
-const main = @import("main.zig");
 const CharUtils = @import("string_parsing.zig").CharUtils;
 const dom = @import("dom.zig");
 const Iterator = dom.Iterator;
@@ -67,7 +66,6 @@ pub fn parse_number(
         try parse_exponent(src, &p, &exponent);
     }
     if (is_float) {
-        // main.println("is_float {c}", .{p[0]});
         const dirty_end = CharUtils.is_not_structural_or_whitespace(p[0]);
         try write_float(src, negative, i, start_digits, digit_count, exponent, tb);
         if (dirty_end) {
