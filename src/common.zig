@@ -42,8 +42,18 @@ pub inline fn ptr_diff(comptime T: type, p1: anytype, p2: anytype) !T {
     return std.math.cast(T, diff / (@sizeOf(U))) orelse return error.Overflow;
 }
 
-pub const FileError = std.fs.File.OpenError || std.fs.File.ReadError || std.fs.File.SeekError;
-pub const Error = std.mem.Allocator.Error || std.os.WriteError || FileError || error{ EndOfStream, Overflow } || JsonError;
+pub const FileError =
+    std.fs.File.OpenError ||
+    std.fs.File.ReadError ||
+    std.fs.File.SeekError;
+
+pub const Error =
+    std.mem.Allocator.Error ||
+    std.os.WriteError ||
+    FileError ||
+    error{ EndOfStream, Overflow, UserDefined } ||
+    JsonError;
+
 pub const JsonError = error{
     /// This parser can't support a document that big
     CAPACITY,

@@ -1811,6 +1811,7 @@ pub const Element = struct {
         out.* = try elems.toOwnedSlice();
     }
 
+    // TODO support user error sets
     /// this being public allows for custom jsonParse() methods to call back into this method.
     pub fn jsonParse(ele: Element, args: anytype) cmn.Error!void {
         const out = args[0];
