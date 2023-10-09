@@ -1504,22 +1504,21 @@ pub const Parser = struct {
         return parser.stage2();
     }
 
-    pub inline fn element(parser: Parser) Element {
-        return .{
-            .tape = .{ .doc = &parser.doc, .idx = 1 },
-        };
+    pub inline fn element(parser: *const Parser) Element {
+        return .{ .tape = .{ .doc = &parser.doc, .idx = 1 } };
     }
 };
 
 pub const Array = struct {
     tape: TapeRef,
     pub fn at(a: Array, idx: usize) ?Element {
-        var it = TapeRefIterator.init(a);
-        const target_idx = idx + it.tape.idx + idx;
-        while (true) {
-            if (it.tape.idx == target_idx)
-                return Element{ .tape = .{ .doc = it.tape.doc, .idx = it.tape.idx } };
-            _ = it.next() orelse break;
+        var i: usize = 0;
+        const end = a.tape.after_element() - 1;
+        var arr = Array{ .tape = .{ .idx = a.tape.idx + 1, .doc = a.tape.doc } };
+        while (arr.tape.idx < end) {
+            if (i == idx) return .{ .tape = arr.tape };
+            arr.tape.idx = arr.tape.after_element();
+            i += 1;
         }
         return null;
     }
@@ -1688,6 +1687,7 @@ const TapeRef = struct {
 
     pub fn get_string_length(tr: TapeRef) u32 {
         const string_buf_index = tr.value();
+        // std.debug.print("get_string_length string_buf_index={}\n", .{string_buf_index});
         return mem.readIntLittle(u32, (tr.doc.string_buf.ptr + string_buf_index)[0..@sizeOf(u32)]);
     }
 

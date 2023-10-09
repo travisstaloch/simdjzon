@@ -192,6 +192,52 @@ test "search tape" {
     try testing.expectEqual(@as(i64, 116), try array1.get_int64());
 }
 
+test "array of objects" {
+    var parser = try dom.Parser.initFixedBuffer(allr,
+        \\[{"a": 1}, {"b": 2}]
+    , .{});
+    defer parser.deinit();
+    try parser.parse();
+    const ele = parser.element();
+    try testing.expect(ele.is(.ARRAY));
+    const array = try ele.get_array();
+    const array0 = array.at(0) orelse unreachable;
+    try testing.expect(array0.is(.OBJECT));
+    const array0_afield = array0.at_key("a") orelse unreachable;
+    try testing.expect(array0_afield.is(.INT64));
+    try testing.expectEqual(@as(i64, 1), try array0_afield.get_int64());
+}
+
+test "array of objects 2" {
+    var parser = try dom.Parser.initFixedBuffer(allr,
+        \\[{"foo": null, "params": [1,2,4],  "id": 1},
+        \\ {"foo": null, "params": [1,2,10], "id": 2}]
+    , .{});
+    defer parser.deinit();
+    try parser.parse();
+    const ele = parser.element();
+    try testing.expect(ele.is(.ARRAY));
+    const array = try ele.get_array();
+
+    const array0 = array.at(0) orelse unreachable;
+    try testing.expect(array0.is(.OBJECT));
+    const params0 = array0.at_key("params") orelse unreachable;
+    try testing.expect(params0.is(.ARRAY));
+    const params0_3 = params0.at(2) orelse unreachable;
+    try testing.expectEqual(@as(i64, 4), try params0_3.get_int64());
+    const id0 = array0.at_key("id") orelse unreachable;
+    try testing.expectEqual(@as(i64, 1), try id0.get_int64());
+
+    const array1 = array.at(1) orelse unreachable;
+    try testing.expect(array1.is(.OBJECT));
+    const params1 = array1.at_key("params") orelse unreachable;
+    try testing.expect(params1.is(.ARRAY));
+    const params1_3 = params1.at(2) orelse unreachable;
+    try testing.expectEqual(@as(i64, 10), try params1_3.get_int64());
+    const id1 = array1.at_key("id") orelse unreachable;
+    try testing.expectEqual(@as(i64, 2), try id1.get_int64());
+}
+
 test "json pointer" {
     const input =
         \\{"a": {"b": [1,2,3], "c": 3.1415, "d": true, "e": "e-string", "f": null}}
