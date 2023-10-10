@@ -776,7 +776,7 @@ test "get_string_alloc" {
 
 test "ondemand array iteration nested 2" {
     try test_ondemand_doc(
-        \\{"a": [{}, {}] }
+        \\{"a": [{"b": 1, "c": 2, "d": 3}, {"b": 1, "c": 2, "d": 3}] }
     , struct {
         fn func(doc: *ondemand.Document) E!void {
             var buf: [0x10]u8 = undefined;
@@ -786,7 +786,19 @@ test "ondemand array iteration nested 2" {
             var arr1 = try field1.value.get_array();
             var it = arr1.iterator();
             var i: u8 = 0;
-            while (try it.next()) |_| : (i += 1) {}
+            while (try it.next()) |_ao| : (i += 1) {
+                var ao = _ao;
+                try testing.expectEqual(ondemand.ValueType.object, try ao.get_type());
+                var d = try ao.find_field_unordered("d");
+                try testing.expectEqual(ondemand.ValueType.number, try d.get_type());
+                try testing.expectEqual(@as(i64, 3), try d.get_int(i64));
+                var c = try ao.find_field_unordered("c");
+                try testing.expectEqual(ondemand.ValueType.number, try c.get_type());
+                try testing.expectEqual(@as(i64, 2), try c.get_int(i64));
+                var b = try ao.find_field_unordered("b");
+                try testing.expectEqual(ondemand.ValueType.number, try b.get_type());
+                try testing.expectEqual(@as(i64, 1), try b.get_int(i64));
+            }
             try testing.expectEqual(@as(u8, 2), i);
         }
     }.func);

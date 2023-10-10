@@ -31,7 +31,8 @@ pub const Value = struct {
         return x.find_field(key);
     }
     pub fn find_field_unordered(v: *Value, key: []const u8) !Value {
-        return (try v.start_or_resume_object()).find_field_unordered(key);
+        var x = try v.start_or_resume_object();
+        return x.find_field_unordered(key);
     }
     pub fn get_object(v: *Value) !Object {
         return Object.start(&v.iter);
