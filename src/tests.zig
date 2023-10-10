@@ -400,9 +400,7 @@ test "dom user defined jsonParse()" {
     ;
     const T = struct {
         foo: []const u8,
-        pub fn jsonParse(ele: dom.Element, args: anytype) !void {
-            _ = ele;
-            var out = args[0];
+        pub fn jsonParse(_: dom.Element, out: anytype, _: cmn.GetOptions) !void {
             out.foo = "foo";
         }
     };
@@ -842,7 +840,7 @@ test "ondemand raw_json_token" {
 test "ondemand user defined jsonParse()" {
     const T = struct {
         foo: []const u8,
-        pub fn jsonParse(_: *ondemand.Value, args: anytype, _: ondemand.GetOptions) !void {
+        pub fn jsonParse(_: *ondemand.Value, args: anytype, _: cmn.GetOptions) !void {
             args.foo = "foo";
         }
     };

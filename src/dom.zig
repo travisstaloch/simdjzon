@@ -1769,28 +1769,23 @@ pub const Element = struct {
 
     /// parse from 'ele' into 'out' pointer
     pub fn get(ele: Element, out: anytype) cmn.Error!void {
-        return ele.jsonParse(.{ out, null });
+        return ele.jsonParse(out, .{});
     }
 
     /// parse from 'ele' into 'out' pointer.
     /// to be used inplace of get() when 'out' contains non-string slice types.
     pub fn get_alloc(ele: Element, allocator: mem.Allocator, out: anytype) cmn.Error!void {
-        return ele.jsonParse(.{ out, allocator });
+        return ele.jsonParse(out, .{ .allocator = allocator });
     }
 
     fn readSlice(
         ele: Element,
         out: anytype,
-        args: anytype,
+        options: cmn.GetOptions,
         comptime child_info: std.builtin.Type,
-        comptime C: type,
     ) cmn.Error!void {
         const Cchild = child_info.Pointer.child;
-        // FIXME: convert this panic to a compile error. this shouldn't be possible
-        if (@typeInfo(@TypeOf(args[1])) == .Null)
-            @panic("allocator required for type: " ++ @typeName(C) ++
-                ".  Consider using get_alloc()");
-        const allocator = args[1];
+        const allocator = options.allocator orelse return error.AllocatorRequired;
         var elems = std.ArrayList(Cchild).init(allocator);
         var arr = ele.get_array() catch unreachable;
         var it = TapeRefIterator.init(arr);
@@ -1803,7 +1798,7 @@ pub const Element = struct {
             var out_ele: Cchild = undefined;
             const idx = it.tape.after_element();
             // std.debug.print("next_element={}:{}\n", .{ idx, TapeType.from_u64(it.tape.doc.tape.items[idx]) });
-            try arr_ele.jsonParse(.{ &out_ele, args[1] });
+            try arr_ele.jsonParse(&out_ele, options);
             try elems.append(out_ele);
             it.tape.idx = idx;
             if (it.tape.idx >= it.end_idx) break;
@@ -1813,16 +1808,15 @@ pub const Element = struct {
 
     // TODO support user error sets
     /// this being public allows for custom jsonParse() methods to call back into this method.
-    /// args must be a 2-tuple where the first element is an out pointer and the second is an optional mem.Allocator
-    pub fn jsonParse(ele: Element, args: anytype) cmn.Error!void {
-        const out = args[0];
+    /// out: pointer to be assigned
+    pub fn jsonParse(ele: Element, out: anytype, options: cmn.GetOptions) cmn.Error!void {
         const T = @TypeOf(out);
         const info = @typeInfo(T);
         switch (info) {
             .Pointer => {
                 const C = std.meta.Child(T);
                 if (comptime std.meta.trait.hasFn("jsonParse")(C))
-                    return C.jsonParse(ele, args);
+                    return C.jsonParse(ele, out, options);
 
                 const child_info = @typeInfo(C);
                 switch (info.Pointer.size) {
@@ -1838,17 +1832,17 @@ pub const Element = struct {
                                 null
                             else blk: {
                                 var x: std.meta.Child(C) = undefined;
-                                try ele.jsonParse(.{ &x, args[1] });
+                                try ele.jsonParse(&x, options);
                                 break :blk x;
                             },
-                            .Array => try ele.jsonParse(.{ @as([]std.meta.Child(C), out), args[1] }),
+                            .Array => try ele.jsonParse(@as([]std.meta.Child(C), out), options),
                             .Struct => {
                                 switch (ele.tape.tape_ref_type()) {
                                     .START_OBJECT => {
                                         var obj = ele.get_object() catch unreachable;
                                         inline for (std.meta.fields(C)) |field| {
                                             if (obj.at_key(field.name)) |obj_ele|
-                                                try obj_ele.jsonParse(.{ &@field(out, field.name), args[1] });
+                                                try obj_ele.jsonParse(&@field(out, field.name), options);
                                         }
                                     },
                                     else => return error.INCORRECT_TYPE,
@@ -1859,12 +1853,12 @@ pub const Element = struct {
                                     // std.debug.print("ele.tape.tape_ref_type()={}", .{ele.tape.tape_ref_type()});
                                     switch (ele.tape.tape_ref_type()) {
                                         .STRING => out.* = try ele.get_string(),
-                                        .START_ARRAY => try readSlice(ele, out, args, child_info, C),
+                                        .START_ARRAY => try readSlice(ele, out, options, child_info),
                                         else => return error.INCORRECT_TYPE,
                                     }
                                 } else {
                                     switch (ele.tape.tape_ref_type()) {
-                                        .START_ARRAY => try readSlice(ele, out, args, child_info, C),
+                                        .START_ARRAY => try readSlice(ele, out, options, child_info),
                                         else => return error.INCORRECT_TYPE,
                                     }
                                 }
@@ -1889,7 +1883,7 @@ pub const Element = struct {
                                 var it = TapeRefIterator.init(arr);
                                 for (out) |*out_ele| {
                                     const arr_ele = Element{ .tape = it.tape };
-                                    try arr_ele.jsonParse(.{ out_ele, args[1] });
+                                    try arr_ele.jsonParse(out_ele, options);
                                     _ = it.next() orelse break;
                                 }
                             },

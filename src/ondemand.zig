@@ -20,10 +20,6 @@ else if (builtin.is_test)
 else
     unreachable;
 
-pub const GetOptions = struct {
-    allocator: ?mem.Allocator = null,
-};
-
 pub const Value = struct {
     iter: ValueIterator,
     pub fn find_field(v: *Value, key: []const u8) !Value {
@@ -79,13 +75,15 @@ pub const Value = struct {
         };
     }
 
-    pub fn get(val: *Value, out: anytype, options: GetOptions) cmn.Error!void {
+    /// parse from 'ele' into 'out' pointer
+    pub fn get(val: *Value, out: anytype, options: cmn.GetOptions) cmn.Error!void {
         return val.jsonParse(out, options);
     }
 
+    // TODO support user error sets
     /// this being public allows for custom jsonParse() methods to call back into this method.
     /// out: pointer to be assigned
-    pub fn jsonParse(val: *Value, out: anytype, options: GetOptions) cmn.Error!void {
+    pub fn jsonParse(val: *Value, out: anytype, options: cmn.GetOptions) cmn.Error!void {
         const T = @TypeOf(out);
         const info = @typeInfo(T);
         switch (info) {
@@ -1301,7 +1299,7 @@ pub const Document = struct {
     /// WARNING: retuned strings are allocated with leading and trailing quotes included.
     /// but the returned slice bounds don't include the quotes. so it must be adjusted to include
     /// the quotes before it can be properly freed.
-    pub fn get(doc: *Document, out: anytype, options: GetOptions) !void {
+    pub fn get(doc: *Document, out: anytype, options: cmn.GetOptions) !void {
         var x = doc.value();
         return x.get(out, options);
     }

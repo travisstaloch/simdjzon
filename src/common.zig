@@ -51,7 +51,7 @@ pub const Error =
     std.mem.Allocator.Error ||
     std.os.WriteError ||
     FileError ||
-    error{ EndOfStream, Overflow, UserDefined } ||
+    error{ EndOfStream, Overflow, UserDefined, AllocatorRequired } ||
     JsonError;
 
 pub const JsonError = error{
@@ -120,3 +120,7 @@ pub const Chunk = if (is_x86_64) v.u8x32 else if (is_arm64) v.u8x16 else v.u8x8;
 pub const IChunk = if (is_x86_64) v.i8x32 else if (is_arm64) v.i8x16 else v.i8x8;
 pub const ChunkArr = [chunk_len]u8;
 pub const chunk_len = @sizeOf(Chunk);
+
+pub const GetOptions = struct {
+    allocator: ?std.mem.Allocator = null,
+};
