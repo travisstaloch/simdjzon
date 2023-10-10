@@ -20,7 +20,7 @@ else if (builtin.is_test)
 else
     unreachable;
 
-const GetOptions = struct {
+pub const GetOptions = struct {
     allocator: ?mem.Allocator = null,
 };
 
@@ -80,11 +80,20 @@ pub const Value = struct {
     }
 
     pub fn get(val: *Value, out: anytype, options: GetOptions) cmn.Error!void {
+        return val.jsonParse(out, options);
+    }
+
+    /// this being public allows for custom jsonParse() methods to call back into this method.
+    /// out: pointer to be assigned
+    pub fn jsonParse(val: *Value, out: anytype, options: GetOptions) cmn.Error!void {
         const T = @TypeOf(out);
         const info = @typeInfo(T);
         switch (info) {
             .Pointer => {
                 const C = std.meta.Child(T);
+                if (comptime std.meta.trait.hasFn("jsonParse")(C))
+                    return C.jsonParse(val, out, options);
+
                 const child_info = @typeInfo(C);
                 switch (info.Pointer.size) {
                     .One => {
@@ -96,7 +105,7 @@ pub const Value = struct {
                                 null
                             else blk: {
                                 var x: std.meta.Child(C) = undefined;
-                                try val.get(&x, options);
+                                try val.jsonParse(&x, options);
                                 break :blk x;
                             },
                             .Array => {
@@ -104,7 +113,7 @@ pub const Value = struct {
                                 var iter = arr.iterator();
                                 for (out) |*out_ele| {
                                     var arr_ele = (try iter.next()) orelse break;
-                                    try arr_ele.get(out_ele, options);
+                                    try arr_ele.jsonParse(out_ele, options);
                                 }
                             },
                             .Pointer => {
@@ -117,7 +126,7 @@ pub const Value = struct {
                                                 var iter = arr.iterator();
                                                 while (try iter.next()) |arr_ele_| {
                                                     var arr_ele = arr_ele_;
-                                                    try arr_ele.get(try list.addOne(allocator), options);
+                                                    try arr_ele.jsonParse(try list.addOne(allocator), options);
                                                 }
                                                 out.* = try list.toOwnedSlice(allocator);
                                             },
@@ -125,7 +134,7 @@ pub const Value = struct {
                                             else => return error.INCORRECT_TYPE,
                                         }
                                     } else {
-                                        val.iter.iter.parser.log.err(&val.iter, "slice requires an options.allocator be provided: get(..., .{.allocator = allocator})");
+                                        val.iter.iter.parser.log.err(&val.iter, "slice requires an options.allocator be provided: jsonParse(..., .{.allocator = allocator})");
                                         return error.MEMALLOC;
                                     }
                                 } else @compileError("unsupported type: " ++ @typeName(T) ++
@@ -140,12 +149,12 @@ pub const Value = struct {
                                             if (obj.find_field_unordered(field.name)) |obj_val_| {
                                                 var obj_val = obj_val_;
                                                 if (field_info != .Pointer)
-                                                    try obj_val.get(&@field(out, field.name), options)
+                                                    try obj_val.jsonParse(&@field(out, field.name), options)
                                                 else {
                                                     if (options.allocator != null)
-                                                        try obj_val.get(&@field(out, field.name), options)
+                                                        try obj_val.jsonParse(&@field(out, field.name), options)
                                                     else
-                                                        try obj_val.get(@field(out, field.name), options);
+                                                        try obj_val.jsonParse(@field(out, field.name), options);
                                                 }
                                             } else |_| {}
                                         }

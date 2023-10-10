@@ -394,7 +394,7 @@ test "get_alloc struct field slice more field types" {
     }
 }
 
-test "user defined jsonParse()" {
+test "dom user defined jsonParse()" {
     const input =
         \\{ "foo": "bar"}
     ;
@@ -835,6 +835,25 @@ test "ondemand raw_json_token" {
             var val = try obj.find_field("value");
             const tok = try val.raw_json_token();
             try testing.expectEqualStrings("12321323213213213213213213213211223", tok);
+        }
+    }.func);
+}
+
+test "ondemand user defined jsonParse()" {
+    const T = struct {
+        foo: []const u8,
+        pub fn jsonParse(_: *ondemand.Value, args: anytype, _: ondemand.GetOptions) !void {
+            args.foo = "foo";
+        }
+    };
+
+    try test_ondemand_doc(
+        \\{ "foo": "bar"}
+    , struct {
+        fn func(doc: *ondemand.Document) E!void {
+            var s: T = undefined;
+            try doc.get(&s, .{});
+            try testing.expectEqualStrings("foo", s.foo);
         }
     }.func);
 }

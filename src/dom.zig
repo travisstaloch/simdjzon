@@ -1813,6 +1813,7 @@ pub const Element = struct {
 
     // TODO support user error sets
     /// this being public allows for custom jsonParse() methods to call back into this method.
+    /// args must be a 2-tuple where the first element is an out pointer and the second is an optional mem.Allocator
     pub fn jsonParse(ele: Element, args: anytype) cmn.Error!void {
         const out = args[0];
         const T = @TypeOf(out);
