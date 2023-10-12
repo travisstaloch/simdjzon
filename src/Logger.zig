@@ -84,7 +84,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
 
             for (&log_buf2, 0..) |*c, i| {
                 if (!is_ondemand)
-                    c.* = printable_char(iter.parser.bytes[ci[0] + i])
+                    c.* = printable_char(iter.parser.bytes.items[ci[0] + i])
                 else
                     c.* = printable_char(c.*);
             }
@@ -101,12 +101,12 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
             @memcpy(log_buf2[0..len], ptr[0..len]);
         }
 
-        const end_pos = if (!is_ondemand) iter.parser.bytes.len else iter.parser.end_pos;
+        const end_pos = if (!is_ondemand) iter.parser.bytes.items.len else iter.parser.end_pos;
         for (&log_buf2, 0..) |*c, i| {
             if (next_index[0] + i >= end_pos) break;
-            // std.log.debug("bytes.len {} next_index[0] {} i {}", .{ iter.parser.bytes.len, next_index[0], i });
+            // std.log.debug("bytes.len {} next_index[0] {} i {}", .{ iter.parser.bytes.items.len, next_index[0], i });
             if (!is_ondemand)
-                c.* = printable_char(iter.parser.bytes[next_index[0] + i])
+                c.* = printable_char(iter.parser.bytes.items[next_index[0] + i])
             else
                 c.* = printable_char(c.*);
         }

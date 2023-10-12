@@ -39,13 +39,16 @@ pub const Document = struct {
         const tape_capacity = cmn.ROUNDUP_N(capacity + 3, 64);
         // a document with only zero-length strings... could have capacity/3 string
         // and we would need capacity/3 * 5 bytes on the string buffer
+        const cap_was_non_zero = document.string_buf_cap != 0;
         document.string_buf_cap = cmn.ROUNDUP_N(5 * capacity / 3 + cmn.SIMDJSON_PADDING, 64);
         errdefer {
             allocator.free(document.string_buf);
             document.tape.deinit(allocator);
         }
         try document.tape.ensureTotalCapacity(allocator, tape_capacity);
-        document.string_buf = try allocator.alloc(u8, document.string_buf_cap);
+        // this line prevents realloc erros like 'Allocation size X bytes does not match resize size Y.'
+        if (cap_was_non_zero) document.string_buf.len = document.string_buf_cap;
+        document.string_buf = try allocator.realloc(document.string_buf, document.string_buf_cap);
         document.string_buf.len = 0;
     }
 
@@ -834,7 +837,7 @@ pub const Iterator = struct {
     }
 
     fn peek(iter: *Iterator) [*]const u8 {
-        return iter.parser.bytes.ptr + iter._next_structural[0];
+        return iter.parser.bytes.items.ptr + iter._next_structural[0];
     }
 
     pub fn at_beginning(iter: *Iterator) bool {
@@ -867,7 +870,7 @@ pub const Iterator = struct {
         if (iter.at_eof()) return error.EMPTY;
         iter.log.start_value(iter, "document");
         try visitor.visit_document_start(iter);
-        if (iter.parser.bytes.len == 0) return iter.document_end(visitor);
+        if (iter.parser.bytes.items.len == 0) return iter.document_end(visitor);
 
         const value = iter.advance();
         var state: State = blk: {
@@ -1327,7 +1330,7 @@ pub const Parser = struct {
     open_containers: std.MultiArrayList(OpenContainerInfo),
     max_depth: u16,
     n_structural_indexes: u32 = 0,
-    bytes: []u8 = &[_]u8{},
+    bytes: std.ArrayListUnmanaged(u8) = .{},
     input_len: u32 = 0,
 
     pub const Options = struct {
@@ -1360,40 +1363,48 @@ pub const Parser = struct {
             .allocator = allocator,
             .doc = Document.init(),
             .indexer = try StructuralIndexer.init(),
-            .bytes = &[_]u8{},
+            .bytes = .{},
             .open_containers = std.MultiArrayList(OpenContainerInfo){},
             .max_depth = options.max_depth,
         };
+        try parser.initExisting(allocator, input, options);
+        return parser;
+    }
+
+    /// re-initialize an existing parser which was previously initialized.  this
+    /// allows for an parser to be re-used.
+    pub fn initExisting(parser: *Parser, allocator: mem.Allocator, input: []const u8, options: Options) !void {
         parser.input_len = std.math.cast(u32, input.len) orelse return error.Overflow;
         const capacity = parser.input_len;
         const max_structures = cmn.ROUNDUP_N(capacity, 64) + 2 + 7;
         const paddedlen = try std.math.add(u32, capacity, cmn.SIMDJSON_PADDING);
-        parser.bytes = try parser.allocator.alloc(u8, paddedlen);
-        @memcpy(parser.bytes[0..input.len], input);
+        try parser.bytes.ensureTotalCapacity(parser.allocator, paddedlen);
+        parser.bytes.items.len = paddedlen;
+        @memcpy(parser.bytes.items[0..input.len], input);
 
         // We write spaces in the padded region to avoid having uninitized
         // garbage. If nothing else, garbage getting read might trigger a
         // warning in a memory checking.
-        @memset(parser.bytes[capacity..], ascii_space);
+        @memset(parser.bytes.items[capacity..], ascii_space);
         try parser.doc.allocate(allocator, capacity);
         try parser.indexer.bit_indexer.tail.ensureTotalCapacity(allocator, max_structures);
         try parser.open_containers.ensureTotalCapacity(allocator, options.max_depth);
-        return parser;
     }
 
     fn read_file(parser: *Parser, filename: []const u8) !u32 {
         var f = try std.fs.cwd().openFile(filename, .{ .mode = .read_only });
         defer f.close();
         const len = std.math.cast(u32, try f.getEndPos()) orelse return error.Overflow;
-        if (parser.bytes.len < len) {
+        if (parser.bytes.items.len < len) {
             const paddedlen = try std.math.add(u32, len, cmn.SIMDJSON_PADDING);
-            parser.bytes = try parser.allocator.realloc(parser.bytes, paddedlen);
-            const nbytes = try f.read(parser.bytes);
+            try parser.bytes.ensureTotalCapacity(parser.allocator, paddedlen);
+            parser.bytes.items.len = paddedlen;
+            const nbytes = try f.read(parser.bytes.items);
             if (nbytes < len) return error.IO_ERROR;
             // We write spaces in the padded region to avoid having uninitized
             // garbage. If nothing else, garbage getting read might trigger a
             // warning in a memory checking.
-            @memset(parser.bytes[len..], ascii_space);
+            @memset(parser.bytes.items[len..], ascii_space);
         }
         return len;
     }
@@ -1402,7 +1413,15 @@ pub const Parser = struct {
         parser.indexer.bit_indexer.tail.deinit(parser.allocator);
         parser.open_containers.deinit(parser.allocator);
         parser.doc.deinit(parser.allocator);
-        parser.allocator.free(parser.bytes);
+        parser.bytes.deinit(parser.allocator);
+    }
+
+    pub fn clearRetainingCapacity(parser: *Parser) void {
+        parser.indexer.bit_indexer.tail.clearRetainingCapacity();
+        parser.indexer = .{ .bit_indexer = parser.indexer.bit_indexer, .checker = .{} };
+        parser.open_containers.shrinkRetainingCapacity(0);
+        parser.doc.tape.clearRetainingCapacity();
+        parser.bytes.clearRetainingCapacity();
     }
 
     fn find_escaped(parser: *Parser, backslash_: u64) u64 {
@@ -1478,7 +1497,7 @@ pub const Parser = struct {
         var pos: u32 = 0;
         while (pos < end_pos_minus_step) : (pos += cmn.STEP_SIZE) {
             // cmn.println("i {} pos {}", .{ i, pos });
-            const read_buf = parser.bytes[pos..][0..cmn.STEP_SIZE];
+            const read_buf = parser.bytes.items[pos..][0..cmn.STEP_SIZE];
             try parser.indexer.step(read_buf.*, parser, pos);
             // for (blocks) |block| {
             //     cmn.println("{b:0>64} | characters.whitespace", .{@bitReverse(block.characters.whitespace)});
@@ -1487,7 +1506,7 @@ pub const Parser = struct {
             // }
         }
         var read_buf = [1]u8{0x20} ** cmn.STEP_SIZE;
-        @memcpy(read_buf[0 .. end_pos - pos], parser.bytes[pos..end_pos]);
+        @memcpy(read_buf[0 .. end_pos - pos], parser.bytes.items[pos..end_pos]);
         // std.log.debug("read_buf {d}", .{read_buf});
         try parser.indexer.step(read_buf, parser, pos);
         try parser.indexer.finish(parser, pos + cmn.STEP_SIZE, end_pos, cmn.STREAMING);
