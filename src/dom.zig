@@ -1347,11 +1347,8 @@ pub const Parser = struct {
             .max_depth = options.max_depth,
         };
         parser.input_len = try parser.read_file(filename);
-        const capacity = parser.input_len;
-        try parser.doc.allocate(allocator, capacity);
-        const max_structures = cmn.ROUNDUP_N(capacity, 64) + 2 + 7;
-        try parser.indexer.bit_indexer.tail.ensureTotalCapacity(allocator, max_structures);
-        try parser.open_containers.ensureTotalCapacity(allocator, options.max_depth);
+
+        try parser.finishInit(options);
         return parser;
     }
 
@@ -1367,30 +1364,39 @@ pub const Parser = struct {
             .open_containers = std.MultiArrayList(OpenContainerInfo){},
             .max_depth = options.max_depth,
         };
-        try parser.initExisting(allocator, input, options);
+        try parser.initExisting(input, options);
         return parser;
     }
 
-    /// re-initialize an existing parser which was previously initialized.  this
-    /// allows for an parser to be re-used.
-    pub fn initExisting(parser: *Parser, allocator: mem.Allocator, input: []const u8, options: Options) !void {
+    pub fn initFromReader(allocator: mem.Allocator, reader: anytype, options: Options) !Parser {
+        var parser = Parser{
+            .filename = "<reader>",
+            .allocator = allocator,
+            .doc = Document.init(),
+            .indexer = try StructuralIndexer.init(),
+            .bytes = .{},
+            .open_containers = std.MultiArrayList(OpenContainerInfo){},
+            .max_depth = options.max_depth,
+        };
+        try parser.initExistingFromReader(reader, options);
+        return parser;
+    }
+
+    /// re-initialize an existing parser which was previously initialized
+    pub fn initExisting(parser: *Parser, input: []const u8, options: Options) !void {
         parser.input_len = std.math.cast(u32, input.len) orelse return error.Overflow;
-        const capacity = parser.input_len;
-        const max_structures = cmn.ROUNDUP_N(capacity, 64) + 2 + 7;
-        const paddedlen = try std.math.add(u32, capacity, cmn.SIMDJSON_PADDING);
+        const paddedlen = try std.math.add(u32, parser.input_len, cmn.SIMDJSON_PADDING);
         try parser.bytes.ensureTotalCapacity(parser.allocator, paddedlen);
         parser.bytes.items.len = paddedlen;
         @memcpy(parser.bytes.items[0..input.len], input);
 
-        // We write spaces in the padded region to avoid having uninitized
-        // garbage. If nothing else, garbage getting read might trigger a
-        // warning in a memory checking.
-        @memset(parser.bytes.items[capacity..], ascii_space);
-        try parser.doc.allocate(allocator, capacity);
-        try parser.indexer.bit_indexer.tail.ensureTotalCapacity(allocator, max_structures);
-        try parser.open_containers.ensureTotalCapacity(allocator, options.max_depth);
+        try parser.finishInit(options);
     }
 
+    // 10/11/2023 TS - i would like to remove this in favor of
+    // initExistingFromReader() but i'm leaving it as this method is slightly
+    // more performant as it doesn't need to realloc for the padding bytes
+    // because the total length can be read from the file.
     fn read_file(parser: *Parser, filename: []const u8) !u32 {
         var f = try std.fs.cwd().openFile(filename, .{ .mode = .read_only });
         defer f.close();
@@ -1401,12 +1407,44 @@ pub const Parser = struct {
             parser.bytes.items.len = paddedlen;
             const nbytes = try f.read(parser.bytes.items);
             if (nbytes < len) return error.IO_ERROR;
-            // We write spaces in the padded region to avoid having uninitized
-            // garbage. If nothing else, garbage getting read might trigger a
-            // warning in a memory checking.
-            @memset(parser.bytes.items[len..], ascii_space);
         }
         return len;
+    }
+
+    /// read input from 'reader' into a pre-initialized parser's 'bytes' field.
+    /// this is done in two steps.  first the input is read from 'reader' into
+    /// 'bytes'.  then 32 bytes of padding is added after the input.  this is
+    /// done in order to support all reader types, including non-seekable ones
+    /// where the total length can't be calculated ahead of time.  thus, there
+    /// may be a performance penalty when adding the padding causes the input to
+    /// be moved.  this penalty may be avoided by pre-setting the capacity such
+    /// as: 'parser.bytes.ensureTotalCapacity(N)' where N is greater than
+    /// input.len + 32.
+    pub fn initExistingFromReader(parser: *Parser, reader: anytype, options: Options) !void {
+        parser.bytes.items.len = 0;
+        var bytes = parser.bytes.toManaged(parser.allocator);
+        try reader.readAllArrayList(&bytes, std.math.maxInt(u32));
+        parser.bytes.items = bytes.items;
+        parser.bytes.capacity = bytes.capacity;
+        parser.input_len = std.math.cast(u32, parser.bytes.items.len) orelse
+            return error.Overflow;
+
+        const paddedlen = try std.math.add(u32, parser.input_len, cmn.SIMDJSON_PADDING);
+        try parser.bytes.ensureTotalCapacity(parser.allocator, paddedlen);
+        parser.bytes.items.len = paddedlen;
+
+        try parser.finishInit(options);
+    }
+
+    fn finishInit(parser: *Parser, options: Options) !void {
+        // We write spaces in the padded region to avoid having uninitized
+        // garbage. If nothing else, garbage getting read might trigger a
+        // warning in a memory checking.
+        @memset(parser.bytes.items[parser.input_len..], ascii_space);
+        try parser.doc.allocate(parser.allocator, parser.input_len);
+        const max_structures = cmn.ROUNDUP_N(parser.input_len, 64) + 2 + 7;
+        try parser.indexer.bit_indexer.tail.ensureTotalCapacity(parser.allocator, max_structures);
+        try parser.open_containers.ensureTotalCapacity(parser.allocator, options.max_depth);
     }
 
     pub fn deinit(parser: *Parser) void {
@@ -1416,11 +1454,14 @@ pub const Parser = struct {
         parser.bytes.deinit(parser.allocator);
     }
 
+    /// reset the parser so that it may be re-used.  intended for use with
+    /// initExisting() or initExistingFromReader()
     pub fn clearRetainingCapacity(parser: *Parser) void {
         parser.indexer.bit_indexer.tail.clearRetainingCapacity();
         parser.indexer = .{ .bit_indexer = parser.indexer.bit_indexer, .checker = .{} };
         parser.open_containers.shrinkRetainingCapacity(0);
         parser.doc.tape.clearRetainingCapacity();
+        parser.doc.string_buf.len = 0;
         parser.bytes.clearRetainingCapacity();
     }
 
