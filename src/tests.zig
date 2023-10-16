@@ -436,6 +436,23 @@ test "get_alloc slice of struct" {
     }
 }
 
+test "get_string_int64/uint64" {
+    const input =
+        \\"1234"
+    ;
+    var parser = try dom.Parser.initFixedBuffer(allr, input, .{});
+    defer parser.deinit();
+    try parser.parse();
+    {
+        const int = try parser.element().get_string_int64();
+        try testing.expectEqual(@as(i64, 1234), int);
+    }
+    {
+        const int = try parser.element().get_string_uint64();
+        try testing.expectEqual(@as(u64, 1234), int);
+    }
+}
+
 // const ondemand = simdjzon.ondemand;
 test "ondemand get with struct" {
     const S = struct { a: struct { b: []const u8 } };

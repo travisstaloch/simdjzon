@@ -2009,6 +2009,22 @@ pub const Element = struct {
     pub fn get_string(ele: Element) ![]u8 {
         return (try ele.get_tape_type(.STRING)).STRING;
     }
+    /// parse a string as an i64
+    pub fn get_string_int64(ele: Element) !i64 {
+        const string = (try ele.get_tape_type(.STRING)).STRING;
+        return std.math.cast(i64, try number_parsing.parse_integer(
+            string.ptr,
+            .{ .mode = .from_string },
+        )) orelse error.Overflow;
+    }
+    /// parse a string as an u64
+    pub fn get_string_uint64(ele: Element) !u64 {
+        const string = (try ele.get_tape_type(.STRING)).STRING;
+        return number_parsing.parse_integer(
+            string.ptr,
+            .{ .mode = .from_string },
+        );
+    }
     pub fn get_bool(ele: Element) !bool {
         return switch (ele.tape.tape_ref_type()) {
             .TRUE => true,

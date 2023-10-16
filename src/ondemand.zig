@@ -1072,6 +1072,7 @@ pub const ValueIterator = struct {
         const peek_len = comptime std.math.cast(u16, std.math.log10(@as(usize, std.math.maxInt(T)))) orelse return error.Overflow;
         const u64int = try number_parsing.parse_integer(
             try vi.advance_non_root_scalar(@typeName(T), peek_len),
+            .{},
         );
         return std.math.cast(T, if (@typeInfo(T).Int.signedness == .signed)
             @as(i64, @bitCast(u64int))
@@ -1133,7 +1134,7 @@ pub const ValueIterator = struct {
             vi.iter.parser.log.err_fmt(&vi.iter, "Root number more than 20 characters. start_position {} depth {}", .{ vi.start_position[0], vi.depth });
             return error.NUMBER_ERROR;
         }
-        return std.math.cast(T, try number_parsing.parse_integer(&tmpbuf)) orelse return error.Overflow;
+        return std.math.cast(T, try number_parsing.parse_integer(&tmpbuf, .{})) orelse return error.Overflow;
     }
     fn get_root_double(vi: *ValueIterator) !f64 {
         const max_len = vi.peek_start_length();

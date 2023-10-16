@@ -1766,7 +1766,9 @@ const integer_string_finisher = [256]Error!void{
     error.NUMBER_ERROR,
 };
 // Parse any number from  -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
-pub fn parse_integer(src: [*]const u8) !u64 {
+pub fn parse_integer(src: [*]const u8, comptime options: struct {
+    mode: enum { normal, from_string } = .normal,
+}) !u64 {
     //
     // Check for minus sign
     //
@@ -1803,7 +1805,10 @@ pub fn parse_integer(src: [*]const u8) !u64 {
     //  return (*p == '.' || *p == 'e' || *p == 'E') ? INCORRECT_TYPE : NUMBER_ERROR;
     // }
     // as a single table lookup:
-    if (integer_string_finisher[p[0]]) {} else |err| return err;
+    switch (options.mode) {
+        .normal => if (integer_string_finisher[p[0]]) {} else |err| return err,
+        .from_string => if (p[0] != 0) return error.NUMBER_ERROR,
+    }
     if (digit_count == longest_digit_count) {
         if (negative) {
             // Anything negative above INT64_MAX+1 is invalid
