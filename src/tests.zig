@@ -54,14 +54,14 @@ test "tape build 1" {
     try parser.parse();
 
     // verify doc.string_buf
-    var p: [*:0]u8 = @ptrCast(parser.doc.string_buf.ptr);
+    var p: [*:0]u8 = @ptrCast(parser.doc.string_buf.items.ptr);
     var j: u8 = 0;
     const expected_strings: []const []const u8 = &.{
         "Width",   "Height",    "Title", "View from my room",    "Url",    "http://ex.com/img.png",
         "Private", "Thumbnail", "Url",   "http://ex.com/th.png", "Height", "Width",
         "array",   "Owner",
     };
-    while (@intFromPtr(p) < @intFromPtr(parser.doc.string_buf.ptr + parser.doc.string_buf.len)) : (j += 1) {
+    while (@intFromPtr(p) < @intFromPtr(parser.doc.string_buf.items.ptr + parser.doc.string_buf.items.len)) : (j += 1) {
         const len = mem.bytesAsValue(u32, p[0..4]).*;
         p += 4;
         const str = std.mem.span(p);

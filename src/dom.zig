@@ -18,13 +18,11 @@ const chunk_len = cmn.chunk_len;
 
 pub const Document = struct {
     tape: std.ArrayListUnmanaged(u64),
-    string_buf: []u8,
-    string_buf_cap: u32,
+    string_buf: std.ArrayListUnmanaged(u8),
     pub fn init() Document {
         return .{
-            .tape = std.ArrayListUnmanaged(u64){},
-            .string_buf = &[_]u8{},
-            .string_buf_cap = 0,
+            .tape = .{},
+            .string_buf = .{},
         };
     }
 
@@ -36,26 +34,20 @@ pub const Document = struct {
         // worse with "[7,7,7,7,6,7,7,7,6,7,7,6,[7,7,7,7,6,7,7,7,6,7,7,6,7,7,7,7,7,7,6"
         //where capacity + 1 tape elements are
         // generated, see issue https://github.com/simdjson/simdjson/issues/345
-        const tape_capacity = cmn.ROUNDUP_N(capacity + 3, 64);
         // a document with only zero-length strings... could have capacity/3 string
         // and we would need capacity/3 * 5 bytes on the string buffer
-        const cap_was_non_zero = document.string_buf_cap != 0;
-        document.string_buf_cap = cmn.ROUNDUP_N(5 * capacity / 3 + cmn.SIMDJSON_PADDING, 64);
-        errdefer {
-            allocator.free(document.string_buf);
-            document.tape.deinit(allocator);
-        }
-        try document.tape.ensureTotalCapacity(allocator, tape_capacity);
-        // this line prevents realloc erros like 'Allocation size X bytes does not match resize size Y.'
-        if (cap_was_non_zero) document.string_buf.len = document.string_buf_cap;
-        document.string_buf = try allocator.realloc(document.string_buf, document.string_buf_cap);
-        document.string_buf.len = 0;
+        const tape_cap = cmn.ROUNDUP_N(capacity + 3, 64);
+        try document.tape.ensureTotalCapacity(allocator, tape_cap);
+        errdefer document.tape.deinit(allocator);
+
+        const str_cap = cmn.ROUNDUP_N(5 * capacity / 3 + cmn.SIMDJSON_PADDING, 64);
+        try document.string_buf.ensureTotalCapacity(allocator, str_cap);
+        document.string_buf.items.len = 0;
     }
 
     pub fn deinit(doc: *Document, allocator: mem.Allocator) void {
         doc.tape.deinit(allocator);
-        doc.string_buf.len = doc.string_buf_cap;
-        allocator.free(doc.string_buf[0..doc.string_buf_cap]);
+        doc.string_buf.deinit(allocator);
     }
 };
 
@@ -1116,7 +1108,7 @@ pub const TapeBuilder = struct {
     pub fn init(doc: *Document) TapeBuilder {
         return .{
             .tape = &doc.tape,
-            .current_string_buf_loc = doc.string_buf.ptr,
+            .current_string_buf_loc = doc.string_buf.items.ptr,
         };
     }
 
@@ -1197,7 +1189,7 @@ pub const TapeBuilder = struct {
 
     fn on_start_string(tb: *TapeBuilder, iter: *Iterator) ![*]u8 {
         // iter.log.line_fmt(iter, "", "start_string", "iter.parser.doc.string_buf.len {}", .{iter.parser.doc.string_buf.len});
-        tb.append(cmn.ptr_diff(u64, tb.current_string_buf_loc, iter.parser.doc.string_buf.ptr) catch unreachable, .STRING);
+        tb.append(cmn.ptr_diff(u64, tb.current_string_buf_loc, iter.parser.doc.string_buf.items.ptr) catch unreachable, .STRING);
         return tb.current_string_buf_loc + @sizeOf(u32);
     }
     fn on_end_string(tb: *TapeBuilder, iter: *Iterator, dst: [*]u8) !void {
@@ -1214,9 +1206,8 @@ pub const TapeBuilder = struct {
         // iter.log.line_fmt(iter, "", "on_string_end", "{s}", .{str_start[0..str_len]});
         @memcpy(tb.current_string_buf_loc[0..@sizeOf(u32)], mem.asBytes(&str_len)[0..@sizeOf(u32)]);
         dst[0] = 0;
-        iter.parser.doc.string_buf.len += str_len + 1 + @sizeOf(u32);
+        iter.parser.doc.string_buf.items.len += str_len + 1 + @sizeOf(u32);
         // cmn.println("buf.len {} buf.cap {}", .{ iter.parser.doc.string_buf.len, iter.parser.doc.string_buf_cap });
-        assert(iter.parser.doc.string_buf.len <= iter.parser.doc.string_buf_cap);
         tb.current_string_buf_loc += str_len + 1 + @sizeOf(u32);
     }
 
@@ -1461,7 +1452,7 @@ pub const Parser = struct {
         parser.indexer = .{ .bit_indexer = parser.indexer.bit_indexer, .checker = .{} };
         parser.open_containers.shrinkRetainingCapacity(0);
         parser.doc.tape.clearRetainingCapacity();
-        parser.doc.string_buf.len = 0;
+        parser.doc.string_buf.items.len = 0;
         parser.bytes.clearRetainingCapacity();
     }
 
@@ -1748,11 +1739,11 @@ const TapeRef = struct {
     pub fn get_string_length(tr: TapeRef) u32 {
         const string_buf_index = tr.value();
         // std.debug.print("get_string_length string_buf_index={}\n", .{string_buf_index});
-        return mem.readIntLittle(u32, (tr.doc.string_buf.ptr + string_buf_index)[0..@sizeOf(u32)]);
+        return mem.readIntLittle(u32, (tr.doc.string_buf.items.ptr + string_buf_index)[0..@sizeOf(u32)]);
     }
 
     pub fn get_c_str(tr: TapeRef) [*:0]u8 {
-        return @as([*:0]u8, @ptrCast(tr.doc.string_buf.ptr + tr.value() + @sizeOf(u32)));
+        return @as([*:0]u8, @ptrCast(tr.doc.string_buf.items.ptr + tr.value() + @sizeOf(u32)));
     }
 
     pub fn get_as_type(tr: TapeRef, comptime T: type) T {
