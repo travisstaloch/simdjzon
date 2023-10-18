@@ -873,6 +873,12 @@ test "ondemand user defined jsonParse()" {
     }.func);
 }
 
+fn domCheckTweets(parser: anytype) !void {
+    var tweets = parser.element();
+    const count = try (try tweets.at_pointer("/search_metadata/count")).get_uint64();
+    try testing.expectEqual(@as(u64, 100), count);
+}
+
 test "twitter" {
     const builtin = @import("builtin");
     const output_filename: []const u8 = if (builtin.os.tag == .windows)
@@ -898,11 +904,24 @@ test "twitter" {
 
     {
         var parser = try dom.Parser.initFile(allr, output_filename, .{});
+        defer parser.deinit();
+        try parser.parse();
+        try domCheckTweets(&parser);
+    }
+    { // initFromReader() / initExistingFromReader()
+        const file = try std.fs.cwd().openFile(output_filename, .{ .mode = .read_only });
+        var parser = try dom.Parser.initFromReader(allr, file.reader(), .{});
         try parser.parse();
         defer parser.deinit();
-        var tweets = parser.element();
-        const count = try (try tweets.at_pointer("/search_metadata/count")).get_uint64();
-        try testing.expectEqual(@as(u64, 100), count);
+        try domCheckTweets(&parser);
+
+        for (0..5) |_| {
+            try file.seekTo(0);
+            try parser.initExistingFromReader(file.reader(), .{});
+            try testing.expectEqual(@as(usize, 0), parser.indexer.bit_indexer.tail.items.len);
+            try parser.parse();
+            try domCheckTweets(&parser);
+        }
     }
     {
         var file = try std.fs.cwd().openFile(output_filename, .{ .mode = .read_only });
@@ -913,7 +932,6 @@ test "twitter" {
         var tweets = try parser.iterate();
         var x = try tweets.at_pointer("/search_metadata/count");
         const count = try x.get_int(u8);
-
         try testing.expectEqual(@as(u8, 100), count);
     }
 }
