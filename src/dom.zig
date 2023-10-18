@@ -257,7 +257,7 @@ const Utf8Checker = struct {
                                         // 11111___ 1000____
         const OVERLONG_4: u8 = 1 << 6;  // 11110000 1000____
 
-        const u3xchunk_len = @Vector(u3, chunk_len);
+        const u3xchunk_len = @Vector(chunk_len, u3);
         const byte_1_high_0 = prev1 >> @as(u3xchunk_len, @splat(4));
         const tbl1 = [16]u8{
             // 0_______ ________ <ASCII in byte 1>
