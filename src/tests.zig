@@ -885,23 +885,6 @@ test "twitter" {
         "test\\twitter.json"
     else
         "test/twitter.json";
-    const json_url = "https://raw.githubusercontent.com/simdjson/simdjson/master/jsonexamples/twitter.json";
-    const argv: []const []const u8 = &.{ "curl", "-fsS", "-o", output_filename, json_url };
-    const res = try std.ChildProcess.exec(.{
-        .allocator = allr,
-        .argv = argv,
-    });
-    if (res.stderr.len > 0) {
-        allr.free(res.stderr);
-        if (res.term == .Exited)
-            if (res.term.Exited != 0) return error.UnexpectedExitCode;
-    }
-    if (res.stdout.len > 0) {
-        allr.free(res.stdout);
-        if (res.term == .Exited)
-            if (res.term.Exited != 0) return error.UnexpectedExitCode;
-    }
-
     {
         var parser = try dom.Parser.initFile(allr, output_filename, .{});
         defer parser.deinit();
