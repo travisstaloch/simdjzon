@@ -1331,9 +1331,9 @@ pub const Parser = struct {
             .parser = .{
                 .allocator = allocator,
                 .filename = filename,
-                .doc = dom.Document.init(),
-                .indexer = try dom.StructuralIndexer.init(),
-                .open_containers = std.MultiArrayList(dom.OpenContainerInfo){},
+                .doc = .{},
+                .indexer = .{},
+                .open_containers = .{},
                 .max_depth = options.max_depth,
             },
             .src = src,

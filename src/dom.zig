@@ -17,14 +17,8 @@ const ChunkArr = cmn.ChunkArr;
 const chunk_len = cmn.chunk_len;
 
 pub const Document = struct {
-    tape: std.ArrayListUnmanaged(u64),
-    string_buf: std.ArrayListUnmanaged(u8),
-    pub fn init() Document {
-        return .{
-            .tape = .{},
-            .string_buf = .{},
-        };
-    }
+    tape: std.ArrayListUnmanaged(u64) = .{},
+    string_buf: std.ArrayListUnmanaged(u8) = .{},
 
     pub fn allocate(document: *Document, allocator: mem.Allocator, capacity: u32) !void {
         if (capacity == 0) return;
@@ -52,7 +46,7 @@ pub const Document = struct {
 };
 
 const BitIndexer = struct {
-    tail: std.ArrayListUnmanaged(u32),
+    tail: std.ArrayListUnmanaged(u32) = .{},
 
     // flatten out values in 'bits' assuming that they are are to have values of idx
     // plus their position in the bitvector, and store these indexes at
@@ -64,7 +58,7 @@ const BitIndexer = struct {
         // In some instances, the next branch is expensive because it is mispredicted.
         // Unfortunately, in other cases,
         // it helps tremendously.
-        // cmn.println("{b:0>64} | write() bits", .{@bitReverse(bits_)});
+        // cmn.println("{b:0>64} | write() bits reader_pos_={}", .{ @bitReverse(bits_), reader_pos_ });
         if (bits == 0) {
             // cmn.println("", .{});
             return;
@@ -633,15 +627,8 @@ const Block = struct {
 pub const StructuralIndexer = struct {
     prev_structurals: u64 = 0,
     unescaped_chars_error: u64 = 0,
-    bit_indexer: BitIndexer,
-    checker: Utf8Checker,
-
-    pub fn init() !StructuralIndexer {
-        return StructuralIndexer{
-            .bit_indexer = .{ .tail = std.ArrayListUnmanaged(u32){} },
-            .checker = .{},
-        };
-    }
+    bit_indexer: BitIndexer = .{},
+    checker: Utf8Checker = .{},
 
     fn follows(match: u64, overflow: *u64) u64 {
         const result = match << 1 | overflow.*;
@@ -1332,9 +1319,9 @@ pub const Parser = struct {
         var parser = Parser{
             .filename = filename,
             .allocator = allocator,
-            .doc = Document.init(),
-            .indexer = try StructuralIndexer.init(),
-            .open_containers = std.MultiArrayList(OpenContainerInfo){},
+            .doc = .{},
+            .indexer = .{},
+            .open_containers = .{},
             .max_depth = options.max_depth,
         };
         parser.input_len = try parser.read_file(filename);
@@ -1349,10 +1336,10 @@ pub const Parser = struct {
         var parser = Parser{
             .filename = "<fixed buffer>",
             .allocator = allocator,
-            .doc = Document.init(),
-            .indexer = try StructuralIndexer.init(),
+            .doc = .{},
+            .indexer = .{},
             .bytes = .{},
-            .open_containers = std.MultiArrayList(OpenContainerInfo){},
+            .open_containers = .{},
             .max_depth = options.max_depth,
         };
         try parser.initExisting(input, options);
@@ -1363,10 +1350,10 @@ pub const Parser = struct {
         var parser = Parser{
             .filename = "<reader>",
             .allocator = allocator,
-            .doc = Document.init(),
-            .indexer = try StructuralIndexer.init(),
+            .doc = .{},
+            .indexer = .{},
             .bytes = .{},
-            .open_containers = std.MultiArrayList(OpenContainerInfo){},
+            .open_containers = .{},
             .max_depth = options.max_depth,
         };
         try parser.initExistingFromReader(reader, options);
@@ -1528,7 +1515,7 @@ pub const Parser = struct {
 
         var pos: u32 = 0;
         while (pos < end_pos_minus_step) : (pos += cmn.STEP_SIZE) {
-            // cmn.println("i {} pos {}", .{ i, pos });
+            // cmn.println("pos {}", .{pos});
             const read_buf = parser.bytes.items[pos..][0..cmn.STEP_SIZE];
             try parser.indexer.step(read_buf.*, parser, pos);
             // for (blocks) |block| {
