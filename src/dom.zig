@@ -1362,19 +1362,19 @@ pub const Parser = struct {
 
     /// re-initialize an existing parser which was previously initialized
     pub fn initExisting(parser: *Parser, input: []const u8, options: Options) !void {
+        parser.clearRetainingCapacity();
         parser.input_len = std.math.cast(u32, input.len) orelse return error.Overflow;
         const paddedlen = try std.math.add(u32, parser.input_len, cmn.SIMDJSON_PADDING);
         try parser.bytes.ensureTotalCapacity(parser.allocator, paddedlen);
         parser.bytes.items.len = paddedlen;
         @memcpy(parser.bytes.items[0..input.len], input);
-
         try parser.finishInit(options);
     }
 
     // 10/11/2023 TS - i would like to remove this in favor of
     // initExistingFromReader() but i'm leaving it as this method is slightly
-    // more performant as it doesn't need to realloc for the padding bytes
-    // because the total length can be read from the file.
+    // more performant.  this is because it doesn't need to realloc for the
+    // padding bytes as the total length is known ahead of time.
     fn read_file(parser: *Parser, filename: []const u8) !u32 {
         var f = try std.fs.cwd().openFile(filename, .{ .mode = .read_only });
         defer f.close();
@@ -1389,17 +1389,19 @@ pub const Parser = struct {
         return len;
     }
 
+    /// re-initialize an existing parser which was previously initialized
+    ///
+    /// performance notes:
     /// read input from 'reader' into a pre-initialized parser's 'bytes' field.
     /// this is done in two steps.  first the input is read from 'reader' into
     /// 'bytes'.  then 32 bytes of padding is added after the input.  this is
-    /// done in order to support all reader types, including non-seekable ones
+    /// necessary to support all reader types, including non-seekable ones
     /// where the total length can't be calculated ahead of time.  thus, there
     /// may be a performance penalty when adding the padding causes the input to
     /// be moved.  this penalty may be avoided by pre-setting the capacity such
-    /// as: 'parser.bytes.ensureTotalCapacity(N)' where N is greater than
-    /// input.len + 32.
+    /// as: 'parser.bytes.ensureTotalCapacity(N)' where N is >= input.len + 32.
     pub fn initExistingFromReader(parser: *Parser, reader: anytype, options: Options) !void {
-        parser.bytes.items.len = 0;
+        parser.clearRetainingCapacity();
         var bytes = parser.bytes.toManaged(parser.allocator);
         try reader.readAllArrayList(&bytes, std.math.maxInt(u32));
         parser.bytes.items = bytes.items;
@@ -1410,7 +1412,6 @@ pub const Parser = struct {
         const paddedlen = try std.math.add(u32, parser.input_len, cmn.SIMDJSON_PADDING);
         try parser.bytes.ensureTotalCapacity(parser.allocator, paddedlen);
         parser.bytes.items.len = paddedlen;
-
         try parser.finishInit(options);
     }
 
@@ -1432,14 +1433,22 @@ pub const Parser = struct {
         parser.bytes.deinit(parser.allocator);
     }
 
-    /// reset the parser so that it may be re-used.  intended for use with
-    /// initExisting() or initExistingFromReader()
-    pub fn clearRetainingCapacity(parser: *Parser) void {
+    // reset the parser so that it may be re-used.  called by initExisting() and
+    // initExistingFromReader()
+    fn clearRetainingCapacity(parser: *Parser) void {
+        parser.* = .{
+            .filename = parser.filename,
+            .allocator = parser.allocator,
+            .doc = parser.doc,
+            .indexer = .{ .bit_indexer = .{ .tail = parser.indexer.bit_indexer.tail } },
+            .open_containers = parser.open_containers,
+            .bytes = parser.bytes,
+            .max_depth = parser.max_depth,
+        };
         parser.indexer.bit_indexer.tail.clearRetainingCapacity();
-        parser.indexer = .{ .bit_indexer = parser.indexer.bit_indexer, .checker = .{} };
         parser.open_containers.shrinkRetainingCapacity(0);
         parser.doc.tape.clearRetainingCapacity();
-        parser.doc.string_buf.items.len = 0;
+        parser.doc.string_buf.clearRetainingCapacity();
         parser.bytes.clearRetainingCapacity();
     }
 
