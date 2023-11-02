@@ -276,7 +276,7 @@ test "json pointer" {
     }
     {
         // this contrived example shows you can read string data into slice types other than u8
-        var s = [1]u16{mem.readIntLittle(u16, "xx")} ** 4;
+        var s = [1]u16{mem.readInt(u16, "xx", .little)} ** 4;
         try (try parser.element().at_pointer("/a/e")).get(s[0..2]);
         const expected_u16s: [4]u16 = @bitCast(expected);
         try testing.expectEqualSlices(u16, &expected_u16s, &s);

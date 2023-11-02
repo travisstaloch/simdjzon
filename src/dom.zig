@@ -1735,7 +1735,7 @@ const TapeRef = struct {
     pub fn get_string_length(tr: TapeRef) u32 {
         const string_buf_index = tr.value();
         // std.debug.print("get_string_length string_buf_index={}\n", .{string_buf_index});
-        return mem.readIntLittle(u32, (tr.doc.string_buf.items.ptr + string_buf_index)[0..@sizeOf(u32)]);
+        return mem.readInt(u32, (tr.doc.string_buf.items.ptr + string_buf_index)[0..@sizeOf(u32)], .little);
     }
 
     pub fn get_c_str(tr: TapeRef) [*:0]u8 {
@@ -2028,7 +2028,7 @@ pub const Element = struct {
     }
     pub fn next_tape_value(ele: Element, comptime T: type) T {
         comptime assert(@sizeOf(T) == @sizeOf(u64));
-        return mem.readIntLittle(T, @as([*]const u8, @ptrCast(ele.tape.doc.tape.items.ptr + ele.tape.idx + 1))[0..8]);
+        return mem.readInt(T, @as([*]const u8, @ptrCast(ele.tape.doc.tape.items.ptr + ele.tape.idx + 1))[0..8], .little);
     }
     pub fn as_tape_type(ele: Element, comptime tape_type: TapeType) !Value {
         return switch (tape_type) {
