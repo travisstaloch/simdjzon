@@ -77,7 +77,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
     const content = blk: {
         if (current_index) |ci| {
             if (is_ondemand) {
-                var len = @min(iter.parser.read_buf_len, log_buf2.len);
+                const len = @min(iter.parser.read_buf_len, log_buf2.len);
                 const ptr = iter.peek(ci, len) catch break :blk null;
                 @memcpy(log_buf2[0..len], ptr[0..len]);
             }

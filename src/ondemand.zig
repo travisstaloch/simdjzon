@@ -690,14 +690,14 @@ pub const ValueIterator = struct {
         }
     }
     fn start_root_object(vi: *ValueIterator) !bool {
-        var result = try vi.start_object();
+        const result = try vi.start_object();
         const last_char = (try vi.iter.peek_last())[0];
         if (last_char != '}')
             return vi.iter.report_error(error.TAPE_ERROR, "object invalid: { at beginning of document unmatched by } at end of document");
         return result;
     }
     fn start_root_array(vi: *ValueIterator) !bool {
-        var result = try vi.start_array();
+        const result = try vi.start_array();
         const last_char = (try vi.iter.peek_last())[0];
         if (last_char != ']')
             return vi.iter.report_error(error.TAPE_ERROR, "array invalid: [ at beginning of document unmatched by ] at end of document");
@@ -767,14 +767,14 @@ pub const ValueIterator = struct {
     }
 
     fn start_object(vi: *ValueIterator) !bool {
-        var json: [*]const u8 = try vi.advance_container_start("object", 1);
+        const json: [*]const u8 = try vi.advance_container_start("object", 1);
         if (json[0] != '{')
             return vi.incorrect_type_error("Not an object");
         return vi.started_object();
     }
 
     fn start_array(vi: *ValueIterator) !bool {
-        var json: [*]const u8 = try vi.advance_container_start("array", 1);
+        const json: [*]const u8 = try vi.advance_container_start("array", 1);
         if (json[0] != '[')
             return vi.incorrect_type_error("Not an array");
         return vi.started_array();
@@ -782,7 +782,7 @@ pub const ValueIterator = struct {
 
     fn field_key(vi: *ValueIterator) ![*]const u8 {
         vi.assert_at_next();
-        var key = try vi.iter.advance(std.math.cast(u16, @min(
+        const key = try vi.iter.advance(std.math.cast(u16, @min(
             READ_BUF_CAP,
             vi.peek_start_length(),
         )) orelse return error.Overflow);
@@ -1189,14 +1189,13 @@ fn unsafe_is_equal(a: [*]const u8, target: []const u8) bool {
     if (target.len <= cmn.SIMDJSON_PADDING)
         return (a[target.len + 1] == '"') and mem.eql(u8, a[1 .. target.len + 1], target);
 
-    var r = a;
     var pos: usize = 0;
     while (pos < target.len) : (pos += 1) {
-        if (r[pos] != target[pos]) {
+        if (a[pos] != target[pos]) {
             return false;
         }
     }
-    if (r[pos] != '"') {
+    if (a[pos] != '"') {
         return false;
     }
     return true;

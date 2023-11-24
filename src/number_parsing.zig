@@ -325,7 +325,7 @@ fn parse_decimal2(p_: [*]const u8) Decimal {
         }
         var exp_number: i32 = 0; // exponential part
         while (is_integer(p[0])) {
-            var digit = p[0] - '0';
+            const digit = p[0] - '0';
             if (exp_number < 0x10000)
                 exp_number = 10 * exp_number + digit;
 
@@ -395,7 +395,7 @@ fn decimal_right_shift(h: *Decimal, shift: u6) void {
 }
 
 fn number_of_digits_decimal_left_shift(h: *Decimal, shift_: u32) u32 {
-    var shift = shift_ & 63;
+    const shift = shift_ & 63;
     const number_of_digits_decimal_left_shift_table = [65]u16{
         0x0000, 0x0800, 0x0801, 0x0803, 0x1006, 0x1009, 0x100D, 0x1812, 0x1817,
         0x181D, 0x2024, 0x202B, 0x2033, 0x203C, 0x2846, 0x2850, 0x285B, 0x3067,
@@ -472,7 +472,7 @@ fn number_of_digits_decimal_left_shift(h: *Decimal, shift_: u32) u32 {
     };
     const pow5: [*]const u8 = @ptrCast(&number_of_digits_decimal_left_shift_table_powers_of_5[pow5_a]);
     var i: u32 = 0;
-    var n: u32 = pow5_b - pow5_a;
+    const n: u32 = pow5_b - pow5_a;
     while (i < n) : (i += 1) {
         if (i >= h.num_digits) {
             return num_new_digits - 1;
@@ -615,7 +615,7 @@ fn compute_float(d: *Decimal) AdjustedMantissa {
             }
             shift = if (d.digits[0] < 2) 2 else 1;
         } else {
-            var n: u32 = @intCast(-d.decimal_point);
+            const n: u32 = @intCast(-d.decimal_point);
             shift = if (n < num_powers) powers[n] else max_shift;
         }
         decimal_left_shift(d, shift);
@@ -629,7 +629,7 @@ fn compute_float(d: *Decimal) AdjustedMantissa {
     }
     // We are now in the range [1/2 ... 1] but the binary format uses [1 ... 2].
     exp2 -= 1;
-    var minimum_exponent: i32 = BinaryFormat.minimum_exponent;
+    const minimum_exponent: i32 = BinaryFormat.minimum_exponent;
     while ((minimum_exponent + 1) > exp2) {
         var n: u6 = @intCast((minimum_exponent + 1) - exp2);
         if (n > max_shift) {
@@ -956,7 +956,7 @@ inline fn compute_float_64(power: i64, _i: u64, negative: bool, d: *f64) bool {
         // with a returned value of type value128 with a "low component" corresponding to the
         // 64-bit least significant bits of the product and with a "high component" corresponding
         // to the 64-bit most significant bits of the product.
-        var secondproduct = CharUtils.full_multiplication(i, power_of_five_128[index + 1]);
+        const secondproduct = CharUtils.full_multiplication(i, power_of_five_128[index + 1]);
         firstproduct.low +%= secondproduct.high;
         if (secondproduct.high > firstproduct.low) {
             firstproduct.high += 1;
@@ -1785,7 +1785,7 @@ pub fn parse_integer(src: [*]const u8, comptime options: struct {
 
     // If there were no digits, or if the integer starts with 0 and has more than one digit, it's an error.
     // Optimization note: size_t is expected to be unsigned.
-    var digit_count = try common.ptr_diff(u32, p, start_digits);
+    const digit_count = try common.ptr_diff(u32, p, start_digits);
     // The longest negative 64-bit number is 19 digits.
     // The longest positive 64-bit number is 20 digits.
     // We do it this way so we don't trigger this branch unless we must.
@@ -1838,7 +1838,7 @@ pub fn parse_double(src_: [*]const u8) !f64 {
     // Check for minus sign
     //
     const negative = (src_[0] == '-');
-    var src = src_ + @intFromBool(negative);
+    const src = src_ + @intFromBool(negative);
 
     //
     // Parse the integer part.

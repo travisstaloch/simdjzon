@@ -70,7 +70,7 @@ const BitIndexer = struct {
 
         // Do the first 8 all together
         {
-            var new_items = indexer.tail.addManyAsArrayAssumeCapacity(8);
+            const new_items = indexer.tail.addManyAsArrayAssumeCapacity(8);
             for (new_items) |*ptr| {
                 ptr.* = @intCast(reader_pos + @ctz(bits));
                 bits = (bits -% 1) & bits;
@@ -81,7 +81,7 @@ const BitIndexer = struct {
         // Do the next 8 all together (we hope in most cases it won't happen at all
         // and the branch is easily predicted).
         if (cnt > 8) {
-            var new_items = indexer.tail.addManyAsArrayAssumeCapacity(8);
+            const new_items = indexer.tail.addManyAsArrayAssumeCapacity(8);
             for (new_items) |*ptr| {
                 ptr.* = @intCast(reader_pos + @ctz(bits));
                 bits = (bits -% 1) & bits;
@@ -1454,7 +1454,7 @@ pub const Parser = struct {
 
     fn find_escaped(parser: *Parser, backslash_: u64) u64 {
         // If there was overflow, pretend the first character isn't a backslash
-        var backslash = backslash_ & ~parser.prev_escaped;
+        const backslash = backslash_ & ~parser.prev_escaped;
         const follows_escape = backslash << 1 | parser.prev_escaped;
 
         // Get sequences starting on even bits by clearing out the odd series using +
@@ -1834,7 +1834,7 @@ pub const Element = struct {
         const Cchild = child_info.Pointer.child;
         const allocator = options.allocator orelse return error.AllocatorRequired;
         var elems = std.ArrayList(Cchild).init(allocator);
-        var arr = ele.get_array() catch unreachable;
+        const arr = ele.get_array() catch unreachable;
         var it = TapeRefIterator.init(arr);
         // for (it.tape.doc.tape.items, 0..) |item, i| {
         //     std.debug.print("{}/{}={}\n", .{ i, it.end_idx, TapeType.from_u64(item) });
@@ -1926,7 +1926,7 @@ pub const Element = struct {
                                 );
                             },
                             .START_ARRAY => {
-                                var arr = ele.get_array() catch unreachable;
+                                const arr = ele.get_array() catch unreachable;
                                 var it = TapeRefIterator.init(arr);
                                 for (out) |*out_ele| {
                                     const arr_ele = Element{ .tape = it.tape };

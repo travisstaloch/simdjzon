@@ -769,11 +769,11 @@ test "get_string_alloc" {
             defer arena.deinit();
             const a = arena.allocator();
             {
-                var str = try doc.get_string_alloc([]u8, a);
+                const str = try doc.get_string_alloc([]u8, a);
                 try testing.expectEqualStrings("asdf", str);
             }
             {
-                var str = try doc.get_string_alloc([]const u8, a);
+                const str = try doc.get_string_alloc([]const u8, a);
                 try testing.expectEqualStrings("asdf", str);
             }
         }
@@ -838,7 +838,7 @@ test "ondemand raw_json_token" {
         \\12321323213213213213213213213211223
     , struct {
         fn func(doc: *ondemand.Document) E!void {
-            var tok = try doc.raw_json_token();
+            const tok = try doc.raw_json_token();
             try testing.expectEqualStrings("12321323213213213213213213213211223", tok);
         }
     }.func);
