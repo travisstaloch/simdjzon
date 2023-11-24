@@ -89,7 +89,7 @@ pub const Value = struct {
         switch (info) {
             .Pointer => {
                 const C = std.meta.Child(T);
-                if (comptime std.meta.trait.hasFn("jsonParse")(C))
+                if (comptime cmn.hasFn("jsonParse")(C))
                     return C.jsonParse(val, out, options);
 
                 const child_info = @typeInfo(C);
