@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub fn build(b: *std.build.Builder) void {
+pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const target = b.standardTargetOptions(.{});
 
@@ -36,8 +36,8 @@ pub fn build(b: *std.build.Builder) void {
     const options_mod = options.createModule();
 
     const mod = b.addModule("simdjzon", .{
-        .source_file = .{ .path = "src/simdjzon.zig" },
-        .dependencies = &.{
+        .root_source_file = .{ .path = "src/simdjzon.zig" },
+        .imports = &.{
             .{ .name = "build_options", .module = options_mod },
         },
     });
@@ -47,7 +47,7 @@ pub fn build(b: *std.build.Builder) void {
         .target = target,
         .optimize = optimize,
     });
-    main_tests.addModule("simdjzon", mod);
+    main_tests.root_module.addImport("simdjzon", mod);
     // main_tests.setFilter("tape build 1");
 
     const test_step = b.step("test", "Run tests");
@@ -61,7 +61,7 @@ pub fn build(b: *std.build.Builder) void {
         .target = target,
         .optimize = optimize,
     });
-    exe.addModule("simdjzon", mod);
+    exe.root_module.addImport("simdjzon", mod);
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
