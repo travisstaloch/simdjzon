@@ -6,58 +6,6 @@ const Chunk = cmn.Chunk;
 const chunk_len = cmn.chunk_len;
 const half_chunk_len = chunk_len / 2;
 
-// ---
-// from https://gist.github.com/sharpobject/80dc1b6f3aaeeada8c0e3a04ebc4b60a
-// ---
-// thanks to sharpobject for these implementations which make it possible to get
-// rid of old utils.c and stop linking libc.
-// ---
-
-fn _mm256_permute2x128_si256_0x21(a: Chunk, b: Chunk) Chunk {
-    const uint = std.meta.Int(.unsigned, @bitSizeOf(Chunk) / 4);
-    const V = @Vector(4, uint);
-    return @bitCast(@shuffle(
-        uint,
-        @as(V, @bitCast(a)),
-        @as(V, @bitCast(b)),
-        [_]i32{ 2, 3, -1, -2 },
-    ));
-}
-
-fn _mm256_alignr_epi8(a: Chunk, b: Chunk, comptime imm8: comptime_int) Chunk {
-    var ret: Chunk = undefined;
-    var i: usize = 0;
-    while (i + imm8 < half_chunk_len) : (i += 1) {
-        ret[i] = b[i + imm8];
-    }
-    while (i < half_chunk_len) : (i += 1) {
-        ret[i] = a[i + imm8 - half_chunk_len];
-    }
-    while (i + imm8 < chunk_len) : (i += 1) {
-        ret[i] = b[i + imm8];
-    }
-    while (i < chunk_len) : (i += 1) {
-        ret[i] = a[i + imm8 - half_chunk_len];
-    }
-    return ret;
-}
-
-pub fn _prev1(a: Chunk, b: Chunk) Chunk {
-    return _mm256_alignr_epi8(a, _mm256_permute2x128_si256_0x21(b, a), half_chunk_len - 1);
-}
-
-pub fn _prev2(a: Chunk, b: Chunk) Chunk {
-    return _mm256_alignr_epi8(a, _mm256_permute2x128_si256_0x21(b, a), half_chunk_len - 2);
-}
-
-pub fn _prev3(a: Chunk, b: Chunk) Chunk {
-    return _mm256_alignr_epi8(a, _mm256_permute2x128_si256_0x21(b, a), half_chunk_len - 3);
-}
-
-// ---
-// --- end from https://gist.github.com/sharpobject/80dc1b6f3aaeeada8c0e3a04ebc4b60a
-// ---
-
 pub fn mm256_shuffle_epi8(x: v.u8x32, mask: v.u8x32) v.u8x32 {
     return asm (
         \\ vpshufb %[mask], %[x], %[out]
