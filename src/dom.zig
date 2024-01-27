@@ -339,20 +339,9 @@ const Utf8Checker = struct {
     }
 
     fn must_be_2_3_continuation(prev2: Chunk, prev3: Chunk) Chunk {
-        // do unsigned saturating subtraction, then interpret as signed so we can check if > 0 below
-        const is_third_byte = @as(
-            IChunk,
-            @bitCast(prev2 -| @as(Chunk, @splat(0b11100000 - 1))),
-        ); // Only 111_____ will be > 0
-        const is_fourth_byte = @as(
-            IChunk,
-            @bitCast(prev3 -| @as(Chunk, @splat(0b11110000 - 1))),
-        ); // Only 1111____ will be > 0
-
-        // Caller requires a bool (all 1's). All values resulting from the subtraction will be <= 64, so signed comparison is fine.
-        const i1xchunk_len = @Vector(chunk_len, i1);
-        const result = @as(i1xchunk_len, @bitCast((is_third_byte | is_fourth_byte) > @as(@Vector(chunk_len, i8), @splat(0))));
-        return @as(Chunk, @bitCast(@as(IChunk, result)));
+        const is_third_byte = prev2 -| @as(Chunk, @splat(0b11100000 - 0x80)); // Only 111_____ will be >= 0x80
+        const is_fourth_byte = prev3 -| @as(Chunk, @splat(0b11110000 - 0x80)); // Only 1111____ will be >= 0x80
+        return is_third_byte | is_fourth_byte;
     }
 
     //
