@@ -113,22 +113,9 @@ const Utf8Checker = struct {
 
     const zeros: ChunkArr = [1]u8{0} ** chunk_len;
 
-    fn prev(comptime N: u8, chunk: Chunk, prev_chunk: Chunk) Chunk {
-        return switch (N) {
-            1 => blk: {
-                const cprev = c._prev1(chunk, prev_chunk);
-                break :blk cprev;
-            },
-            2 => blk: {
-                const cprev = c._prev2(chunk, prev_chunk);
-                break :blk cprev;
-            },
-            3 => blk: {
-                const cprev = c._prev3(chunk, prev_chunk);
-                break :blk cprev;
-            },
-            else => unreachable,
-        };
+    fn prev(comptime N: comptime_int, chunk: Chunk, prev_chunk: Chunk) Chunk {
+        comptime assert(0 < N and N < chunk_len);
+        return std.simd.mergeShift(prev_chunk, chunk, chunk_len - N);
     }
     const check_special_cases = if (cmn.is_arm64) check_special_cases_arm64 else check_special_cases_x86;
     // zig fmt: off
