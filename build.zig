@@ -71,4 +71,18 @@ pub fn build(b: *std.Build) void {
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
+
+    const twitterbench = b.addExecutable(.{
+        .name = "twitterbench",
+        .root_source_file = .{ .path = "bench/twitter/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    twitterbench.root_module.addImport("simdjzon", mod);
+    b.installArtifact(twitterbench);
+    const run_twitter_bench = b.addRunArtifact(twitterbench);
+    if (b.args) |args| run_twitter_bench.addArgs(args);
+    const run_twitter_bench_step = b.step("twitter-bench", "Run the twitter-bench");
+    run_twitter_bench_step.dependOn(&run_twitter_bench.step);
+
 }
