@@ -1,6 +1,8 @@
 # run tests and make sure
 
 set -xe
+# wget https://raw.githubusercontent.com/simdjson/simdjson/master/jsonexamples/twitter.json -O test/twitter.json
+# curl -fsS -o test/twitter.json https://raw.githubusercontent.com/simdjson/simdjson/master/jsonexamples/twitter.json
 
 args="-freference-trace"
 declare -a options=("-Doptimize=Debug" "-Doptimize=ReleaseSafe") # "-Doptimize=ReleaseFast" "-Doptimize=ReleaseSmall")
@@ -20,5 +22,4 @@ for option in "${options[@]}"; do
   done
 done
 
-# wget https://raw.githubusercontent.com/simdjson/simdjson/master/jsonexamples/twitter.json -O test/twitter.json
 

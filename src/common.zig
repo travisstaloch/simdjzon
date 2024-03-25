@@ -49,7 +49,6 @@ pub const FileError =
 
 pub const Error =
     std.mem.Allocator.Error ||
-    std.os.WriteError ||
     FileError ||
     error{ EndOfStream, Overflow, UserDefined, AllocatorRequired } ||
     JsonError;
