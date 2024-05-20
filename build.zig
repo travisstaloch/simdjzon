@@ -36,14 +36,14 @@ pub fn build(b: *std.Build) void {
     const options_mod = options.createModule();
 
     const mod = b.addModule("simdjzon", .{
-        .root_source_file = .{ .path = "src/simdjzon.zig" },
+        .root_source_file = b.path("src/simdjzon.zig"),
         .imports = &.{
             .{ .name = "build_options", .module = options_mod },
         },
     });
 
     var main_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/tests.zig" },
+        .root_source_file = b.path("src/tests.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -57,7 +57,7 @@ pub fn build(b: *std.Build) void {
 
     const exe = b.addExecutable(.{
         .name = "simdjzon",
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -74,7 +74,7 @@ pub fn build(b: *std.Build) void {
 
     const twitterbench = b.addExecutable(.{
         .name = "twitterbench",
-        .root_source_file = .{ .path = "bench/twitter/main.zig" },
+        .root_source_file = b.path("bench/twitter/main.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -84,5 +84,4 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_twitter_bench.addArgs(args);
     const run_twitter_bench_step = b.step("twitter-bench", "Run the twitter-bench");
     run_twitter_bench_step.dependOn(&run_twitter_bench.step);
-
 }
