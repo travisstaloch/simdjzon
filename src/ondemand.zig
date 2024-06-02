@@ -12,13 +12,23 @@ const atom_parsing = @import("atom_parsing.zig");
 const CharUtils = string_parsing.CharUtils;
 const root = @import("root");
 const builtin = @import("builtin");
-// TODO: document that this is configurable in root
+
+/// Users must specify `pub const read_buf_cap = N;` in their root source file.
+/// This sets the static `ondemand.Parser.read_buf` size.  `read_buf` is
+/// where chunks of json source are stored.  recommended `std.mem.page_size`.
+/// Larger `read_buf_cap` may improve performance for large json files.
 pub const READ_BUF_CAP = if (@hasDecl(root, "read_buf_cap"))
     root.read_buf_cap
 else if (builtin.is_test)
     mem.page_size
 else
-    unreachable;
+    @compileError(
+        \\root source file is missing a `pub const read_buf_cap` declaration.
+        \\This sets the static `ondemand.Parser.read_buf` size.  `read_buf` is
+        \\where chunks of json source are stored.  recommended
+        \\`std.mem.page_size`.
+        \\
+    );
 
 pub const Value = struct {
     iter: ValueIterator,
@@ -1318,6 +1328,7 @@ pub const Parser = struct {
     parser: dom.Parser,
     src: *std.io.StreamSource,
     end_pos: u32,
+    /// buffer used for reading from `src`
     read_buf: [READ_BUF_CAP]u8 = undefined,
     /// result of src.read() - number of bytes read from src
     read_buf_len: u16 = 0,

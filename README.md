@@ -44,7 +44,7 @@ No fallback for unsupported CPUs is provided yet.
 # zig compiler support
 The main branch is meant to compile with zig's master branch.  It is tested weekly on linux, windows and macos. 
 
-The zig-0.10.0 branch works with zig's 0.10.0 release.  It is tested on linux only when it is updated.
+For older compiler versions, use a [tagged version](https://github.com/travisstaloch/simdjzon/tags).
 
 # usage
 ```console
@@ -92,6 +92,8 @@ test "at_pointer" {
 }
 
 const ondemand = @import("ondemand.zig");
+// ondemand api users must specify `pub const read_buf_cap = N;` in their
+// root source file.  In tests, this defaults to `std.mem.page_size`. 
 test "ondemand get with struct" {
     const S = struct { a: struct { b: []const u8 } };
     const input =

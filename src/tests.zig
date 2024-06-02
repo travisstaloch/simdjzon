@@ -483,6 +483,8 @@ test "dom object key iterator" {
 }
 
 // const ondemand = simdjzon.ondemand;
+// ondemand api users must specify `pub const read_buf_cap = N;` in their
+// root source file.  In tests, this defaults to `std.mem.page_size`.
 test "ondemand get with struct" {
     const S = struct { a: struct { b: []const u8 } };
     const input =
