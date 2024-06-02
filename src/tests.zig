@@ -453,6 +453,35 @@ test "get_string_int64/uint64" {
     }
 }
 
+test "dom object key iterator" {
+    const input =
+        \\{"a": {"c": null, "d": 3}, "b": 2}
+    ;
+    var parser = try dom.Parser.initFixedBuffer(allr, input, .{});
+    defer parser.deinit();
+    try parser.parse();
+    const ele = parser.element();
+    const o = try ele.get_object();
+    {
+        var keyit = o.key_iterator();
+        for ([_][]const u8{ "a", "b" }) |exkey| {
+            const key = keyit.next() orelse return error.TestUnexpectedResult;
+            try testing.expectEqualStrings(key, exkey);
+        }
+        try testing.expect(keyit.next() == null);
+    }
+    {
+        const ele2 = o.at_key("a") orelse return error.TestUnexpectedResult;
+        const o2 = try ele2.get_object();
+        var keyit = o2.key_iterator();
+        for ([_][]const u8{ "c", "d" }) |exkey| {
+            const key = keyit.next() orelse return error.TestUnexpectedResult;
+            try testing.expectEqualStrings(key, exkey);
+        }
+        try testing.expect(keyit.next() == null);
+    }
+}
+
 // const ondemand = simdjzon.ondemand;
 test "ondemand get with struct" {
     const S = struct { a: struct { b: []const u8 } };

@@ -1640,6 +1640,19 @@ const Object = struct {
 
         return child;
     }
+
+    pub const KeyIterator = struct {
+        tape_it: TapeRefIterator,
+
+        pub fn next(it: *KeyIterator) ?[]const u8 {
+            const s = it.tape_it.element().get_string() catch return null;
+            _ = it.tape_it.next();
+            return s;
+        }
+    };
+    pub fn key_iterator(o: Object) KeyIterator {
+        return .{ .tape_it = TapeRefIterator.init(o) };
+    }
 };
 
 // TODO rename these
