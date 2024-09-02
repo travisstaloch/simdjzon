@@ -1820,7 +1820,7 @@ pub const Element = struct {
         options: cmn.GetOptions,
         comptime child_info: std.builtin.Type,
     ) cmn.Error!void {
-        const Cchild = child_info.Pointer.child;
+        const Cchild = child_info.pointer.child;
         const allocator = options.allocator orelse return error.AllocatorRequired;
         var elems = std.ArrayList(Cchild).init(allocator);
         const arr = ele.get_array() catch unreachable;
@@ -1849,30 +1849,30 @@ pub const Element = struct {
         const T = @TypeOf(out);
         const info = @typeInfo(T);
         switch (info) {
-            .Pointer => {
+            .pointer => {
                 const C = std.meta.Child(T);
                 if (comptime cmn.hasFn("jsonParse")(C))
                     return C.jsonParse(ele, out, options);
 
                 const child_info = @typeInfo(C);
-                switch (info.Pointer.size) {
+                switch (info.pointer.size) {
                     .One => {
                         switch (child_info) {
-                            .Int => out.* = std.math.cast(C, try if (child_info.Int.signedness == .signed)
+                            .int => out.* = std.math.cast(C, try if (child_info.int.signedness == .signed)
                                 ele.get_int64()
                             else
                                 ele.get_uint64()) orelse return error.Overflow,
-                            .Float => out.* = @as(C, @floatCast(try ele.get_double())),
-                            .Bool => out.* = try ele.get_bool(),
-                            .Optional => out.* = if (ele.is(.NULL))
+                            .float => out.* = @as(C, @floatCast(try ele.get_double())),
+                            .bool => out.* = try ele.get_bool(),
+                            .optional => out.* = if (ele.is(.NULL))
                                 null
                             else blk: {
                                 var x: std.meta.Child(C) = undefined;
                                 try ele.jsonParse(&x, options);
                                 break :blk x;
                             },
-                            .Array => try ele.jsonParse(@as([]std.meta.Child(C), out), options),
-                            .Struct => {
+                            .array => try ele.jsonParse(@as([]std.meta.Child(C), out), options),
+                            .@"struct" => {
                                 switch (ele.tape.tape_ref_type()) {
                                     .START_OBJECT => {
                                         var obj = ele.get_object() catch unreachable;
@@ -1884,8 +1884,8 @@ pub const Element = struct {
                                     else => return error.INCORRECT_TYPE,
                                 }
                             },
-                            .Pointer => if (child_info.Pointer.size == .Slice) {
-                                if (child_info.Pointer.child == u8) {
+                            .pointer => if (child_info.pointer.size == .Slice) {
+                                if (child_info.pointer.child == u8) {
                                     // std.debug.print("ele.tape.tape_ref_type()={}", .{ele.tape.tape_ref_type()});
                                     switch (ele.tape.tape_ref_type()) {
                                         .STRING => out.* = try ele.get_string(),

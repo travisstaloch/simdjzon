@@ -97,26 +97,26 @@ pub const Value = struct {
         const T = @TypeOf(out);
         const info = @typeInfo(T);
         switch (info) {
-            .Pointer => {
+            .pointer => {
                 const C = std.meta.Child(T);
                 if (comptime cmn.hasFn("jsonParse")(C))
                     return C.jsonParse(val, out, options);
 
                 const child_info = @typeInfo(C);
-                switch (info.Pointer.size) {
+                switch (info.pointer.size) {
                     .One => {
                         switch (child_info) {
-                            .Int => out.* = try val.get_int(C),
-                            .Float => out.* = @floatCast(try val.get_double()),
-                            .Bool => out.* = try val.get_bool(),
-                            .Optional => out.* = if (try val.is_null())
+                            .int => out.* = try val.get_int(C),
+                            .float => out.* = @floatCast(try val.get_double()),
+                            .bool => out.* = try val.get_bool(),
+                            .optional => out.* = if (try val.is_null())
                                 null
                             else blk: {
                                 var x: std.meta.Child(C) = undefined;
                                 try val.jsonParse(&x, options);
                                 break :blk x;
                             },
-                            .Array => {
+                            .array => {
                                 var arr = try val.get_array();
                                 var iter = arr.iterator();
                                 for (out) |*out_ele| {
@@ -124,8 +124,8 @@ pub const Value = struct {
                                     try arr_ele.jsonParse(out_ele, options);
                                 }
                             },
-                            .Pointer => {
-                                if (child_info.Pointer.size == .Slice) {
+                            .pointer => {
+                                if (child_info.pointer.size == .Slice) {
                                     if (options.allocator) |allocator| {
                                         switch (try val.get_type()) {
                                             .array => {
@@ -148,7 +148,7 @@ pub const Value = struct {
                                 } else @compileError("unsupported type: " ++ @typeName(T) ++
                                     ". expecting slice");
                             },
-                            .Struct => {
+                            .@"struct" => {
                                 switch (try val.iter.get_type()) {
                                     .object => {
                                         var obj = try val.get_object();
@@ -156,7 +156,7 @@ pub const Value = struct {
                                             const field_info = @typeInfo(field.type);
                                             if (obj.find_field_unordered(field.name)) |obj_val_| {
                                                 var obj_val = obj_val_;
-                                                if (field_info != .Pointer)
+                                                if (field_info != .pointer)
                                                     try obj_val.jsonParse(&@field(out, field.name), options)
                                                 else {
                                                     if (options.allocator != null)
@@ -1084,7 +1084,7 @@ pub const ValueIterator = struct {
             try vi.advance_non_root_scalar(@typeName(T), peek_len),
             .{},
         );
-        return std.math.cast(T, if (@typeInfo(T).Int.signedness == .signed)
+        return std.math.cast(T, if (@typeInfo(T).int.signedness == .signed)
             @as(i64, @bitCast(u64int))
         else
             u64int) orelse return error.Overflow;

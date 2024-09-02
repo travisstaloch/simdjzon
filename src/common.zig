@@ -128,7 +128,7 @@ pub const TraitFn = fn (type) bool;
 
 pub fn isContainer(comptime T: type) bool {
     return switch (@typeInfo(T)) {
-        .Struct, .Union, .Enum, .Opaque => true,
+        .@"struct", .@"union", .@"enum", .@"opaque" => true,
         else => false,
     };
 }
@@ -139,7 +139,7 @@ pub fn hasFn(comptime name: []const u8) TraitFn {
             if (!comptime isContainer(T)) return false;
             if (!comptime @hasDecl(T, name)) return false;
             const DeclType = @TypeOf(@field(T, name));
-            return @typeInfo(DeclType) == .Fn;
+            return @typeInfo(DeclType) == .@"fn";
         }
     };
     return Closure.trait;
