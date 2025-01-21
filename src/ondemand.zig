@@ -2,16 +2,16 @@ const std = @import("std");
 const mem = std.mem;
 const os = std.os;
 const assert = std.debug.assert;
+const builtin = @import("builtin");
+const root = @import("root");
 
+const atom_parsing = @import("atom_parsing.zig");
 const cmn = @import("common.zig");
 const dom = @import("dom.zig");
 const Logger = @import("Logger.zig");
 const number_parsing = @import("number_parsing.zig");
 const string_parsing = @import("string_parsing.zig");
-const atom_parsing = @import("atom_parsing.zig");
 const CharUtils = string_parsing.CharUtils;
-const root = @import("root");
-const builtin = @import("builtin");
 
 /// Users must specify `pub const read_buf_cap = N;` in their root source file.
 /// This sets the static `ondemand.Parser.read_buf` size.  `read_buf` is
@@ -104,7 +104,7 @@ pub const Value = struct {
 
                 const child_info = @typeInfo(C);
                 switch (info.pointer.size) {
-                    .One => {
+                    .one => {
                         switch (child_info) {
                             .int => out.* = try val.get_int(C),
                             .float => out.* = @floatCast(try val.get_double()),
@@ -125,7 +125,7 @@ pub const Value = struct {
                                 }
                             },
                             .pointer => {
-                                if (child_info.pointer.size == .Slice) {
+                                if (child_info.pointer.size == .slice) {
                                     if (options.allocator) |allocator| {
                                         switch (try val.get_type()) {
                                             .array => {
@@ -174,7 +174,7 @@ pub const Value = struct {
                                 ". expecting int, float, bool or optional type."),
                         }
                     },
-                    .Slice => {
+                    .slice => {
                         switch (try val.iter.get_type()) {
                             .string => _ = try if (options.allocator) |allocator|
                                 val.get_string_alloc(T, allocator)

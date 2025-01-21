@@ -1,20 +1,20 @@
 const std = @import("std");
-const builtin = @import("builtin");
-
 const mem = std.mem;
 const os = std.os;
 const assert = std.debug.assert;
-const v = @import("vector_types.zig");
-const c = @import("c_intrinsics.zig");
-const string_parsing = @import("string_parsing.zig");
-const number_parsing = @import("number_parsing.zig");
+const builtin = @import("builtin");
+
 const atom_parsing = @import("atom_parsing.zig");
-const Logger = @import("Logger.zig");
+const c = @import("c_intrinsics.zig");
 const cmn = @import("common.zig");
 const Chunk = cmn.Chunk;
 const IChunk = cmn.IChunk;
 const ChunkArr = cmn.ChunkArr;
 const chunk_len = cmn.chunk_len;
+const Logger = @import("Logger.zig");
+const number_parsing = @import("number_parsing.zig");
+const string_parsing = @import("string_parsing.zig");
+const v = @import("vector_types.zig");
 
 pub const Document = struct {
     tape: std.ArrayListUnmanaged(u64) = .{},
@@ -1856,7 +1856,7 @@ pub const Element = struct {
 
                 const child_info = @typeInfo(C);
                 switch (info.pointer.size) {
-                    .One => {
+                    .one => {
                         switch (child_info) {
                             .int => out.* = std.math.cast(C, try if (child_info.int.signedness == .signed)
                                 ele.get_int64()
@@ -1884,7 +1884,7 @@ pub const Element = struct {
                                     else => return error.INCORRECT_TYPE,
                                 }
                             },
-                            .pointer => if (child_info.pointer.size == .Slice) {
+                            .pointer => if (child_info.pointer.size == .slice) {
                                 if (child_info.pointer.child == u8) {
                                     // std.debug.print("ele.tape.tape_ref_type()={}", .{ele.tape.tape_ref_type()});
                                     switch (ele.tape.tape_ref_type()) {
@@ -1904,7 +1904,7 @@ pub const Element = struct {
                                 ". int, float, bool or optional type."),
                         }
                     },
-                    .Slice => {
+                    .slice => {
                         switch (ele.tape.tape_ref_type()) {
                             .STRING => {
                                 const string = ele.get_string() catch unreachable;
