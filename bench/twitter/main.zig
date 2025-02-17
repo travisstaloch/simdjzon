@@ -1,7 +1,8 @@
 const std = @import("std");
+
 const dom = @import("simdjzon").dom;
 
-pub const read_buf_cap = std.mem.page_size;
+pub const read_buf_cap = 4096;
 
 pub fn main() !u8 {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -21,8 +22,8 @@ pub fn main() !u8 {
     const array = try statuses.get_array();
     var i: usize = 0;
     while (array.at(i)) |status| : (i += 1) {
-        _ = status; // autofix
-        // const id = try status.at_pointer("/id");
+        const id = try status.at_pointer("/id");
+        std.mem.doNotOptimizeAway(id);
         // std.debug.print("{}\n", .{try id.get_int64()});
     }
     // std.debug.print("i={}\n", .{i});

@@ -1,14 +1,14 @@
 const std = @import("std");
 const testing = std.testing;
 const mem = std.mem;
+const allr = testing.allocator;
 
-const TapeType = dom.TapeType;
 const simdjzon = @import("simdjzon");
 const dom = simdjzon.dom;
 const ondemand = simdjzon.ondemand;
 const cmn = simdjzon.common;
+const TapeType = dom.TapeType;
 
-const allr = testing.allocator;
 test "tape build 1" {
     std.debug.print("\n", .{});
     const f = try std.fs.cwd().openFile("test/test.json", .{});

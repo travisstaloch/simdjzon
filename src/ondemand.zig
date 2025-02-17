@@ -15,18 +15,18 @@ const CharUtils = string_parsing.CharUtils;
 
 /// Users must specify `pub const read_buf_cap = N;` in their root source file.
 /// This sets the static `ondemand.Parser.read_buf` size.  `read_buf` is
-/// where chunks of json source are stored.  recommended `std.mem.page_size`.
+/// where chunks of json source are stored.  recommended `std.heap.pageSize()`.
 /// Larger `read_buf_cap` may improve performance for large json files.
 pub const READ_BUF_CAP = if (@hasDecl(root, "read_buf_cap"))
     root.read_buf_cap
 else if (builtin.is_test)
-    mem.page_size
+    4096
 else
     @compileError(
         \\root source file is missing a `pub const read_buf_cap` declaration.
         \\This sets the static `ondemand.Parser.read_buf` size.  `read_buf` is
         \\where chunks of json source are stored.  recommended
-        \\`std.mem.page_size`.
+        \\`std.heap.pageSize()`.
         \\
     );
 
