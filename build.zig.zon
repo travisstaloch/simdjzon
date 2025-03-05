@@ -1,0 +1,7 @@
+.{
+    .name = .simdjzon,
+    .version = "0.0.1",
+    .fingerprint = 0xc4994cf38052e3ee,
+    .dependencies = .{},
+    .paths = .{"."},
+}

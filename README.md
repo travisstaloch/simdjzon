@@ -47,6 +47,7 @@ The main branch is meant to compile with zig's master branch.  It is tested week
 For older compiler versions, use a [tagged version](https://github.com/travisstaloch/simdjzon/tags).
 
 # usage
+### Git Clone
 ```console
 # json validation
 $ git clone https://github.com/travisstaloch/simdjzon
@@ -61,6 +62,26 @@ $ echo $? # 0 on success
 0
 $ zig build test
 All 19 tests passed.
+```
+
+### Zig Package
+```console
+$ $ zig fetch --save git+https://github.com/travisstaloch/simdjzon
+info: resolved to commit 28d46c979f761b211539232378138b692ef50d55
+```
+```zig
+// build.zig
+const simdjzon_dep = b.dependency("simdjzon", .{ .target = target, .optimize = optimize });
+const exe_mod = b.createModule(.{
+    // ...
+    .imports = &.{
+        .{ .name = "simdjzon", .module = simdjzon_dep.module("simdjzon") },
+    },
+});
+```
+```zig
+// main.zig
+const simdjzon = @import("simdjzon");
 ```
 
 ```zig
@@ -178,6 +199,7 @@ $ echo $?
 ### timed against simdjson, go, nim, zig std lib
 The simdjson binary was compiled as shown above.  Go and nim binaries created with sources from JSONTestSuite. [zig std lib driver](bench/src/zig_json.zig).
 Validation times for several large json files.  Created with [benchmark_and_plot.jl](bench/benchmark_and_plot.jl)
+
 ![results](https://github.com/travisstaloch/simdjson-zig/blob/media/bench/validation_grouped.png)
 
 # JSONTestSuite
