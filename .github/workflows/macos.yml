@@ -5,28 +5,29 @@ on:
   pull_request:
     branches: [ main ]
   schedule:
-    - cron: "0 10 * * 1"
+    - cron: '0 0 * * 1'
 
 jobs:
   build:
+    strategy:
+      matrix:
+        optimize: [Debug, ReleaseSafe, ReleaseFast]
     runs-on: macos-latest
-
+    env:
+      ARCH: "aarch64"
     steps:
     - name: Checkout
       uses: actions/checkout@v3
-      with:
-        submodules: recursive
-        fetch-depth: 0
 
     - name: Setup Zig
-      uses: mlugg/setup-zig@v1
+      uses: mlugg/setup-zig@v2
       with:
         version: master
-
-    - run: zig build -Dtarget=aarch64-macos test
-    - run: zig build -Dtarget=aarch64-macos test -Dstep-128
-    - run: zig build -Dtarget=aarch64-macos
-    - run: zig build -Dtarget=aarch64-macos -Dondemand
-    - run: zig build -Dtarget=aarch64-macos -Dstep-128 
-    - run: zig build -Dtarget=aarch64-macos -Dondemand -Dstep-128
+    - run: curl -fsS -o test/twitter.json https://raw.githubusercontent.com/simdjson/simdjson/master/jsonexamples/twitter.json
+    - run: zig build test -Doptimize=${{ matrix.optimize }}
+    - run: zig build test -Dstep-128 -Doptimize=${{ matrix.optimize }}
+    - run: zig build -Doptimize=${{ matrix.optimize }}
+    - run: zig build -Dondemand -Doptimize=${{ matrix.optimize }}
+    - run: zig build -Dstep-128  -Doptimize=${{ matrix.optimize }}
+    - run: zig build -Dondemand -Dstep-128 -Doptimize=${{ matrix.optimize }}
   

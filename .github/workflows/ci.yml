@@ -1,0 +1,35 @@
+name: CI
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '0 0 * * 1'
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        optimize: [Debug, ReleaseSafe, ReleaseFast]
+        runs-on: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: master
+      - run: curl -fsS -o test/twitter.json https://raw.githubusercontent.com/simdjson/simdjson/master/jsonexamples/twitter.json
+      - run: zig build test -Doptimize=${{ matrix.optimize }}
+      - run: zig build test -Dstep-128 -Doptimize=${{ matrix.optimize }}
+      - run: zig build -Doptimize=${{ matrix.optimize }}
+      - run: zig build -Dondemand -Doptimize=${{ matrix.optimize }}
+      - run: zig build -Dstep-128 -Doptimize=${{ matrix.optimize }}
+      - run: zig build -Dondemand -Dstep-128 -Doptimize=${{ matrix.optimize }}
+  
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: master
+      - run: zig fmt --check .

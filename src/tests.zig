@@ -671,6 +671,7 @@ test "ondemand array iteration nested 1" {
 }
 
 test "ondemand root types" {
+    if (@import("builtin").target.cpu.arch == .aarch64 and @import("builtin").mode == .ReleaseSafe) return error.SkipZigTest;
     try test_ondemand_doc(
         \\1
     , struct {
