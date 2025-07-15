@@ -1272,6 +1272,8 @@ pub const TapeBuilder = struct {
     }
 };
 
+const bytes_align: std.mem.Alignment = @enumFromInt(std.math.log2(cmn.chunk_len));
+
 pub const Parser = struct {
     filename: []const u8,
     allocator: mem.Allocator,
@@ -1284,7 +1286,7 @@ pub const Parser = struct {
     open_containers: std.MultiArrayList(OpenContainerInfo),
     max_depth: u16,
     n_structural_indexes: u32 = 0,
-    bytes: std.ArrayListUnmanaged(u8) = .{},
+    bytes: std.ArrayListAlignedUnmanaged(u8, bytes_align) = .{},
     input_len: u32 = 0,
 
     pub const Options = struct {
@@ -1322,7 +1324,8 @@ pub const Parser = struct {
         return parser;
     }
 
-    pub fn initFromReader(allocator: mem.Allocator, reader: anytype, options: Options) !Parser {
+    pub fn initFromReader(allocator: mem.Allocator, reader: *std.io.Reader, options: Options) !Parser {
+        // TODO bench with Reader.expandTotalCapacity or Reader.fillMore
         var parser = Parser{
             .filename = "<reader>",
             .allocator = allocator,
@@ -1332,6 +1335,7 @@ pub const Parser = struct {
             .open_containers = .{},
             .max_depth = options.max_depth,
         };
+        errdefer parser.deinit();
         try parser.initExistingFromReader(reader, options);
         return parser;
     }
@@ -1376,12 +1380,9 @@ pub const Parser = struct {
     /// may be a performance penalty when adding the padding causes the input to
     /// be moved.  this penalty may be avoided by pre-setting the capacity such
     /// as: 'parser.bytes.ensureTotalCapacity(N)' where N is >= input.len + 32.
-    pub fn initExistingFromReader(parser: *Parser, reader: anytype, options: Options) !void {
+    pub fn initExistingFromReader(parser: *Parser, reader: *std.io.Reader, options: Options) !void {
         parser.clearRetainingCapacity();
-        var bytes = parser.bytes.toManaged(parser.allocator);
-        try reader.readAllArrayList(&bytes, std.math.maxInt(u32));
-        parser.bytes.items = bytes.items;
-        parser.bytes.capacity = bytes.capacity;
+        try reader.appendRemaining(parser.allocator, bytes_align, &parser.bytes, .unlimited);
         parser.input_len = std.math.cast(u32, parser.bytes.items.len) orelse
             return error.Overflow;
 

@@ -43,12 +43,15 @@ pub fn build(b: *std.Build) void {
     });
 
     var main_tests = b.addTest(.{
-        .root_source_file = b.path("src/tests.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tests.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     main_tests.root_module.addImport("simdjzon", mod);
-    // main_tests.setFilter("tape build 1");
+    main_tests.use_llvm = true; // TODO remove when #26 is resolved
+    b.installArtifact(main_tests);
 
     const test_step = b.step("test", "Run tests");
     const main_tests_run = b.addRunArtifact(main_tests);
@@ -57,11 +60,14 @@ pub fn build(b: *std.Build) void {
 
     const exe = b.addExecutable(.{
         .name = "simdjzon",
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     exe.root_module.addImport("simdjzon", mod);
+    exe.use_llvm = true; // TODO remove when #26 is resolved
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -74,11 +80,14 @@ pub fn build(b: *std.Build) void {
 
     const twitterbench = b.addExecutable(.{
         .name = "twitterbench",
-        .root_source_file = b.path("bench/twitter/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bench/twitter/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     twitterbench.root_module.addImport("simdjzon", mod);
+    twitterbench.use_llvm = true; // TODO remove when #26 is resolved
     b.installArtifact(twitterbench);
     const run_twitter_bench = b.addRunArtifact(twitterbench);
     if (b.args) |args| run_twitter_bench.addArgs(args);

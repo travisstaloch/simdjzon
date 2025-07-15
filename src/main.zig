@@ -18,8 +18,8 @@ pub fn domMain(allocator: std.mem.Allocator, args: Args) !u8 {
     var parser: dom.Parser = undefined;
 
     if (args.filename.len == 0) {
-        var stdin = std.io.getStdIn().reader();
-        const input = try stdin.readAllAlloc(allocator, std.math.maxInt(u32));
+        const stdin = std.fs.File.stdin();
+        const input = try stdin.readToEndAlloc(allocator, std.math.maxInt(u32));
         parser = try dom.Parser.initFixedBuffer(allocator, input, .{});
     } else {
         parser = try dom.Parser.initFile(allocator, args.filename, .{});
@@ -41,8 +41,7 @@ pub fn ondemandMain(allocator: std.mem.Allocator, args: Args) !u8 {
     defer if (parser.src.* == .file) parser.src.file.close();
 
     if (args.filename.len == 0) {
-        var stdin = std.io.getStdIn().reader();
-        const input = try stdin.readAllAlloc(allocator, std.math.maxInt(u32));
+        const input = try std.fs.File.stdin().readToEndAlloc(allocator, std.math.maxInt(u32));
         var src = std.io.StreamSource{ .buffer = std.io.fixedBufferStream(input) };
         parser = try ondemand.Parser.init(&src, allocator, "<stdin>", .{});
     } else {
@@ -133,7 +132,9 @@ pub fn main() !u8 {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    const stdout = std.io.getStdOut().writer();
+    var buf: [4096]u8 = undefined;
+    var stdoutw = std.fs.File.stdout().writer(&buf);
+    const stdout = &stdoutw.interface;
     var args = try std.process.argsAlloc(allocator);
     const exename = args[0];
     args = args[1..];
@@ -162,7 +163,7 @@ pub fn main() !u8 {
         domMain(allocator, aargs);
     const diderr = if (result) |_| false else |_| true;
     if (aargs.verbose and !diderr)
-        try stdout.print("valid parse in {}\n", .{std.fmt.fmtDuration(timer.lap())});
+        try stdout.print("valid parse in {D}\n", .{timer.lap()});
 
     return result;
 }

@@ -74,7 +74,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
     const next_index = iter.next_structural();
 
     const is_ondemand = @TypeOf(iter) == *Ondemand.Iterator;
-    const content = blk: {
+    const content: ?[]const u8 = blk: {
         if (current_index) |ci| {
             if (is_ondemand) {
                 const len = @min(iter.parser.read_buf_len, log_buf2.len);
@@ -94,7 +94,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
         }
     };
     print("| {?s} ", .{content});
-    const next_content = blk: {
+    const next_content: ?[]const u8 = blk: {
         if (is_ondemand) {
             const len = @min(iter.parser.read_buf_len, log_buf2.len);
             const ptr = iter.peek(next_index, len) catch break :blk null;

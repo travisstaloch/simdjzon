@@ -925,14 +925,17 @@ test "twitter" {
     }
     { // initFromReader() / initExistingFromReader()
         const file = try std.fs.cwd().openFile(output_filename, .{ .mode = .read_only });
-        var parser = try dom.Parser.initFromReader(allr, file.reader(), .{});
-        try parser.parse();
+        var buf: [4096]u8 = undefined;
+        var freader = file.reader(&buf);
+        var parser = try dom.Parser.initFromReader(allr, &freader.interface, .{});
         defer parser.deinit();
+        try parser.parse();
         try domCheckTweets(&parser);
 
         for (0..5) |_| {
             try file.seekTo(0);
-            try parser.initExistingFromReader(file.reader(), .{});
+            freader.pos = 0;
+            try parser.initExistingFromReader(&freader.interface, .{});
             try testing.expectEqual(@as(usize, 0), parser.indexer.bit_indexer.tail.items.len);
             try parser.parse();
             try domCheckTweets(&parser);
