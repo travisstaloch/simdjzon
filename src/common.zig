@@ -45,7 +45,8 @@ pub inline fn ptr_diff(comptime T: type, p1: anytype, p2: anytype) !T {
 pub const FileError =
     std.fs.File.OpenError ||
     std.fs.File.ReadError ||
-    std.fs.File.SeekError;
+    std.fs.File.SeekError ||
+    std.fs.File.Reader.SizeError;
 
 pub const Error =
     std.mem.Allocator.Error ||

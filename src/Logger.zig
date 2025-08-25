@@ -101,7 +101,10 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
             @memcpy(log_buf2[0..len], ptr[0..len]);
         }
 
-        const end_pos = if (!is_ondemand) iter.parser.bytes.items.len else iter.parser.end_pos;
+        const end_pos = if (!is_ondemand)
+            iter.parser.bytes.items.len
+        else
+            iter.parser.src.getSize() catch @panic("src.getSize() failed");
         for (&log_buf2, 0..) |*c, i| {
             if (next_index[0] + i >= end_pos) break;
             // std.log.debug("bytes.len {} next_index[0] {} i {}", .{ iter.parser.bytes.items.len, next_index[0], i });

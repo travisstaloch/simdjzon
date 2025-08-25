@@ -1329,17 +1329,20 @@ pub const Document = struct {
 
 pub const Parser = struct {
     parser: dom.Parser,
-    src: std.fs.File,
-    end_pos: usize,
-    /// buffer used for reading from `src`
-    read_buf: *[READ_BUF_CAP]u8,
+    src: *std.fs.File.Reader,
     /// result of src.read() - number of bytes read from src
     read_buf_len: u16 = 0,
     /// src index of the start of the buffer.  set to index[0] each src.read()
     read_buf_start_pos: u32,
     log: Logger = .{ .depth = 0 },
 
-    pub fn init(src: std.fs.File, src_end_pos: usize, allocator: mem.Allocator, filename: []const u8, options: dom.Parser.Options, read_buf: *[READ_BUF_CAP]u8) !Parser {
+    pub fn init(
+        src: *std.fs.File.Reader,
+        allocator: mem.Allocator,
+        filename: []const u8,
+        options: dom.Parser.Options,
+    ) !Parser {
+        assert(src.interface.buffer.len == READ_BUF_CAP);
         var result: Parser = .{
             .parser = .{
                 .allocator = allocator,
@@ -1349,13 +1352,12 @@ pub const Parser = struct {
                 .open_containers = .{},
                 .max_depth = options.max_depth,
             },
-            .read_buf = read_buf,
             .src = src,
-            .end_pos = src_end_pos,
             .read_buf_start_pos = 0,
             .read_buf_len = 0,
         };
-        const max_structures = cmn.ROUNDUP_N(src_end_pos, 64) + 2 + 7;
+
+        const max_structures = cmn.ROUNDUP_N(try src.getSize(), 64) + 2 + 7;
         try result.parser.indexer.bit_indexer.tail.ensureTotalCapacity(allocator, max_structures);
         try result.parser.open_containers.ensureTotalCapacity(allocator, options.max_depth);
         return result;
@@ -1399,24 +1401,23 @@ pub const Parser = struct {
 
     /// position: pointer to a src position
     /// len_hint: requested length to be read from src, starting at position
-    pub fn peek(
-        parser: *Parser,
-        position: [*]const u32,
-        len_hint: u16,
-    ) ![*]const u8 {
+    pub fn peek(parser: *Parser, position: [*]const u32, len_hint: u16) ![*]const u8 {
         if (len_hint > READ_BUF_CAP) return error.CAPACITY;
         const start_pos = position[0];
         if (parser.read_buf_start_pos <= start_pos and start_pos < parser.read_buf_start_pos + parser.read_buf_len) blk: {
             const offset = start_pos - parser.read_buf_start_pos;
             if (offset + len_hint > READ_BUF_CAP) break :blk;
-            return parser.read_buf[offset..].ptr;
+            return parser.src.interface.buffer[offset..].ptr;
         }
         try parser.src.seekTo(start_pos);
         parser.read_buf_start_pos = start_pos;
         comptime assert(READ_BUF_CAP <= std.math.maxInt(u16));
-        parser.read_buf_len = @as(u16, @truncate(try parser.src.read(parser.read_buf)));
+        const end = @min(try parser.src.getSize(), start_pos + READ_BUF_CAP);
+        parser.read_buf_len = @truncate(end - start_pos);
+        // TODO is there a better way to do this?
+        _ = parser.src.interface.peek(parser.read_buf_len) catch unreachable;
         // not sure that '_' is the best value here but it does prevent false positives like [nul]
-        @memset(parser.read_buf[parser.read_buf_len..], '_');
-        return parser.read_buf;
+        @memset(parser.src.interface.buffer[parser.read_buf_len..], '_');
+        return parser.src.interface.buffer.ptr;
     }
 };

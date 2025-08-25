@@ -42,7 +42,8 @@ pub fn ondemandMain(allocator: std.mem.Allocator, args: Args) !u8 {
     const file = try std.fs.cwd().openFile(args.filename, .{ .mode = .read_only });
     defer file.close();
     var read_buf: [read_buf_cap]u8 = undefined;
-    var parser = try ondemand.Parser.init(file, try file.getEndPos(), allocator, args.filename, .{}, &read_buf);
+    var freader = file.reader(&read_buf);
+    var parser = try ondemand.Parser.init(&freader, allocator, args.filename, .{});
     defer parser.deinit();
 
     var doc = try parser.iterate();
@@ -145,7 +146,6 @@ pub fn main() !u8 {
             return 1;
         }
     }
-    std.debug.print("args {}\n", .{aargs});
 
     var timer: std.time.Timer = if (aargs.verbose)
         try std.time.Timer.start()
