@@ -10,7 +10,7 @@ const cmn = simdjzon.common;
 const TapeType = dom.TapeType;
 
 const builtin = @import("builtin");
-const is_wine = @import("build_options").is_wine;
+// const is_wine = @import("build_options").is_wine;
 
 test "tape build 1" {
     const f = try std.fs.cwd().openFile("test/test.json", .{});
@@ -493,14 +493,15 @@ test "ondemand get with struct" {
     const input =
         \\{"a": {"b": "b-string"}}
     ;
+    const file_name = "ondemand_get_with_struct";
     var tdir = testing.tmpDir(.{});
     defer tdir.cleanup();
-    const tfile = try tdir.dir.createFile("ondemand_get_with_struct", .{ .read = true });
+    const tfile = try tdir.dir.createFile(file_name, .{ .read = true });
     defer tfile.close();
     try tfile.writeAll(input);
     try tfile.seekTo(0);
     var read_buf: [READ_BUF_CAP]u8 = undefined;
-    var parser = try ondemand.Parser.init(tfile, input.len, allr, "<fba>", .{}, &read_buf);
+    var parser = try ondemand.Parser.init(tfile, input.len, allr, file_name, .{}, &read_buf);
     defer parser.deinit();
     var doc = try parser.iterate();
 
@@ -518,12 +519,13 @@ test "ondemand at_pointer" {
     ;
     var tdir = testing.tmpDir(.{});
     defer tdir.cleanup();
-    const tfile = try tdir.dir.createFile("ondemand_at_pointer", .{ .read = true });
+    const file_name = "ondemand_at_pointer";
+    const tfile = try tdir.dir.createFile(file_name, .{ .read = true });
     defer tfile.close();
     try tfile.writeAll(input);
     try tfile.seekTo(0);
     var read_buf: [READ_BUF_CAP]u8 = undefined;
-    var parser = try ondemand.Parser.init(tfile, input.len, allr, "<fba>", .{}, &read_buf);
+    var parser = try ondemand.Parser.init(tfile, input.len, allr, file_name, .{}, &read_buf);
     defer parser.deinit();
     var doc = try parser.iterate();
     var b0 = try doc.at_pointer("/a/b/0");
@@ -593,8 +595,7 @@ test "ondemand struct iteration" {
 test "ondemand struct iteration types" {
     // FIXME this hangs in some windows release modes
     // TODO figure out if this test is only an issue on real windows os or just with wine
-    if ((builtin.mode == .ReleaseFast and is_wine) or
-        (builtin.mode == .ReleaseSmall and builtin.target.os.tag == .linux)) return error.SkipZigTest;
+    if ((builtin.mode == .ReleaseSmall and builtin.target.os.tag == .linux)) return error.SkipZigTest;
     try test_ondemand_doc(
         \\ {"str": "strval", "f": 1.23, "t": true, "not": false, "n": null, "neg": -42 }
     , struct {
@@ -697,9 +698,6 @@ test "ondemand array iteration nested 1" {
 }
 
 test "ondemand root types" {
-    if ((builtin.mode == .ReleaseSmall and is_wine) or
-        (builtin.mode == .ReleaseSafe and is_wine) or
-        (builtin.mode == .ReleaseFast and is_wine)) return error.SkipZigTest;
     try test_ondemand_doc(
         \\1
     , struct {
@@ -952,17 +950,24 @@ test "twitter" {
         try domCheckTweets(&parser);
     }
     { // initFromReader() / initExistingFromReader()
-        const file = try std.fs.cwd().openFile(output_filename, .{ .mode = .read_only });
+        var file = try std.fs.cwd().openFile(output_filename, .{});
+        defer file.close();
+
         var buf: [4096]u8 = undefined;
-        var freader = file.reader(&buf);
-        var parser = try dom.Parser.initFromReader(allr, &freader.interface, .{});
+        var parser = parser: {
+            var freader = file.reader(&buf);
+            // parser has an invalid reference to freader. but that ok since we re-init below.
+            var parser = try dom.Parser.initFromReader(allr, &freader.interface, .{});
+            try parser.parse();
+            try domCheckTweets(&parser);
+            break :parser parser;
+        };
         defer parser.deinit();
-        try parser.parse();
-        try domCheckTweets(&parser);
 
         for (0..5) |_| {
-            try file.seekTo(0);
-            freader.pos = 0;
+            file.close();
+            file = try std.fs.cwd().openFile(output_filename, .{});
+            var freader = file.reader(&buf);
             try parser.initExistingFromReader(&freader.interface, .{});
             try testing.expectEqual(@as(usize, 0), parser.indexer.bit_indexer.tail.items.len);
             try parser.parse();
@@ -970,7 +975,7 @@ test "twitter" {
         }
     }
     {
-        var file = try std.fs.cwd().openFile(output_filename, .{ .mode = .read_only });
+        var file = try std.fs.cwd().openFile(output_filename, .{});
         defer file.close();
         var read_buf: [READ_BUF_CAP]u8 = undefined;
         var parser = try ondemand.Parser.init(file, try file.getEndPos(), allr, output_filename, .{}, &read_buf);
