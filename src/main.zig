@@ -37,18 +37,12 @@ pub fn domMain(allocator: std.mem.Allocator, args: Args) !u8 {
 }
 
 pub fn ondemandMain(allocator: std.mem.Allocator, args: Args) !u8 {
-    var parser: ondemand.Parser = undefined;
-    defer if (parser.src.* == .file) parser.src.file.close();
+    if (args.filename.len == 0) return error.MissingFilenameArg;
 
-    if (args.filename.len == 0) {
-        const input = try std.fs.File.stdin().readToEndAlloc(allocator, std.math.maxInt(u32));
-        var src = std.io.StreamSource{ .buffer = std.io.fixedBufferStream(input) };
-        parser = try ondemand.Parser.init(&src, allocator, "<stdin>", .{});
-    } else {
-        const file = try std.fs.cwd().openFile(args.filename, .{ .mode = .read_only });
-        var src = std.io.StreamSource{ .file = file };
-        parser = try ondemand.Parser.init(&src, allocator, args.filename, .{});
-    }
+    const file = try std.fs.cwd().openFile(args.filename, .{ .mode = .read_only });
+    defer file.close();
+    var read_buf: [read_buf_cap]u8 = undefined;
+    var parser = try ondemand.Parser.init(file, try file.getEndPos(), allocator, args.filename, .{}, &read_buf);
     defer parser.deinit();
 
     var doc = try parser.iterate();
@@ -112,7 +106,7 @@ fn recursive_iterate_json(element_: anytype, depth: u16, max_depth: u16, string_
                 },
             }
         },
-        .string => _ = try element.get_string([]u8, string_buf),
+        .string => _ = try element.get_string(string_buf),
         .bool => _ = try element.get_bool(),
         .nul => if (!(try element.is_null())) return error.INCORRECT_TYPE,
     }
@@ -151,6 +145,7 @@ pub fn main() !u8 {
             return 1;
         }
     }
+    std.debug.print("args {}\n", .{aargs});
 
     var timer: std.time.Timer = if (aargs.verbose)
         try std.time.Timer.start()
@@ -161,9 +156,14 @@ pub fn main() !u8 {
         ondemandMain(allocator, aargs)
     else
         domMain(allocator, aargs);
-    const diderr = if (result) |_| false else |_| true;
-    if (aargs.verbose and !diderr)
-        try stdout.print("valid parse in {D}\n", .{timer.lap()});
 
+    if (result) |_| {
+        if (aargs.verbose) {
+            try stdout.print("valid parse in {D}\n", .{timer.lap()});
+            try stdout.flush();
+        }
+    } else |e| {
+        std.debug.print("error {t}\n", .{e});
+    }
     return result;
 }

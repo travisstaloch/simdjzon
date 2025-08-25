@@ -57,10 +57,9 @@ pub fn line_fmt(log: *Logger, iter: anytype, title_prefix: []const u8, title: []
 
 pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []const u8, detail: []const u8) void {
     if (iter.depth >= Logger.MAX_DEPTH) return;
-    var log_buf: [0x100]u8 = undefined;
-    var log_buf2: [LOG_BUFFER_LEN]u8 = undefined;
     if (!common.debug) return;
 
+    var log_buf: [0x100]u8 = undefined;
     var log_fba = std.heap.FixedBufferAllocator.init(&log_buf);
     const depth_padding = pad_with_alloc("", ' ', @as(u8, @intCast(if (log.depth < 0x0f) log.depth * 2 else 0xff)), log_fba.allocator());
     const titles = std.fmt.allocPrint(
@@ -73,6 +72,7 @@ pub fn line(log: *Logger, iter: anytype, title_prefix: []const u8, title: []cons
     const current_index = if (iter.at_beginning()) null else iter.next_structural() - 1;
     const next_index = iter.next_structural();
 
+    var log_buf2: [LOG_BUFFER_LEN]u8 = undefined;
     const is_ondemand = @TypeOf(iter) == *Ondemand.Iterator;
     const content: ?[]const u8 = blk: {
         if (current_index) |ci| {

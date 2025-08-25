@@ -5,7 +5,7 @@ set -xe
 # curl -fsS -o test/twitter.json https://raw.githubusercontent.com/simdjson/simdjson/master/jsonexamples/twitter.json
 
 args="-freference-trace"
-declare -a options=("-Doptimize=Debug" "-Doptimize=ReleaseSafe") # "-Doptimize=ReleaseFast" "-Doptimize=ReleaseSmall")
+declare -a options=("-Doptimize=Debug" "-Doptimize=ReleaseSmall" "-Doptimize=ReleaseSafe" "-Doptimize=ReleaseFast")
 declare -a targets=("native" "aarch64-linux" "native-windows -fwine")
 
 for option in "${options[@]}"; do

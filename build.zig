@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
     const target = b.standardTargetOptions(.{});
 
@@ -33,6 +33,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "ondemand", ondemand);
     options.addOption(u16, "ondemand_read_cap", ondemand_read_cap);
     options.addOption(std.log.Level, "log_level", log_level);
+    options.addOption(bool, "is_wine", b.enable_wine);
     const options_mod = options.createModule();
 
     const mod = b.addModule("simdjzon", .{
@@ -48,8 +49,13 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         }),
+        .filters = if (b.option([]const u8, "test-filter", "test filter")) |f|
+            try b.allocator.dupe([]const u8, &.{f})
+        else
+            &.{},
     });
     main_tests.root_module.addImport("simdjzon", mod);
+    main_tests.root_module.addImport("build_options", options_mod);
     main_tests.use_llvm = true; // TODO remove when #26 is resolved
     b.installArtifact(main_tests);
 

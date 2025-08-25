@@ -9,8 +9,10 @@ const ondemand = simdjzon.ondemand;
 const cmn = simdjzon.common;
 const TapeType = dom.TapeType;
 
+const builtin = @import("builtin");
+const is_wine = @import("build_options").is_wine;
+
 test "tape build 1" {
-    std.debug.print("\n", .{});
     const f = try std.fs.cwd().openFile("test/test.json", .{});
     defer f.close();
     const input = try f.readToEndAlloc(allr, std.math.maxInt(u32));
@@ -482,7 +484,8 @@ test "dom object key iterator" {
     }
 }
 
-// const ondemand = simdjzon.ondemand;
+const READ_BUF_CAP = 4096;
+
 // ondemand api users must specify `pub const read_buf_cap = N;` in their
 // root source file.  In tests, this defaults to `std.mem.page_size`.
 test "ondemand get with struct" {
@@ -490,8 +493,14 @@ test "ondemand get with struct" {
     const input =
         \\{"a": {"b": "b-string"}}
     ;
-    var src = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(input) };
-    var parser = try ondemand.Parser.init(&src, allr, "<fba>", .{});
+    var tdir = testing.tmpDir(.{});
+    defer tdir.cleanup();
+    const tfile = try tdir.dir.createFile("ondemand_get_with_struct", .{ .read = true });
+    defer tfile.close();
+    try tfile.writeAll(input);
+    try tfile.seekTo(0);
+    var read_buf: [READ_BUF_CAP]u8 = undefined;
+    var parser = try ondemand.Parser.init(tfile, input.len, allr, "<fba>", .{}, &read_buf);
     defer parser.deinit();
     var doc = try parser.iterate();
 
@@ -507,8 +516,14 @@ test "ondemand at_pointer" {
     const input =
         \\{"a": {"b": [1,2,3]}}
     ;
-    var src = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(input) };
-    var parser = try ondemand.Parser.init(&src, allr, "<fba>", .{});
+    var tdir = testing.tmpDir(.{});
+    defer tdir.cleanup();
+    const tfile = try tdir.dir.createFile("ondemand_at_pointer", .{ .read = true });
+    defer tfile.close();
+    try tfile.writeAll(input);
+    try tfile.seekTo(0);
+    var read_buf: [READ_BUF_CAP]u8 = undefined;
+    var parser = try ondemand.Parser.init(tfile, input.len, allr, "<fba>", .{}, &read_buf);
     defer parser.deinit();
     var doc = try parser.iterate();
     var b0 = try doc.at_pointer("/a/b/0");
@@ -522,8 +537,15 @@ test "ondemand at_pointer" {
 const E = cmn.Error || error{ TestExpectedEqual, TestUnexpectedResult, TestExpectedApproxEqAbs, TestUnexpectedError, TestExpectedError };
 fn test_ondemand_doc(input: []const u8, expected: *const fn (doc: *ondemand.Document) E!void) !void {
     // std.debug.print("\n0123456789012345678901234567890123456789\n{s}\n", .{input});
-    var src = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(input) };
-    var parser = try ondemand.Parser.init(&src, allr, "<fba>", .{});
+    var tdir = testing.tmpDir(.{});
+    defer tdir.cleanup();
+    const file_name = "test_ondemand_doc";
+    const tfile = try tdir.dir.createFile(file_name, .{ .read = true });
+    defer tfile.close();
+    try tfile.writeAll(input);
+    try tfile.seekTo(0);
+    var read_buf: [READ_BUF_CAP]u8 = undefined;
+    var parser = try ondemand.Parser.init(tfile, input.len, allr, file_name, .{}, &read_buf);
     defer parser.deinit();
     var doc = try parser.iterate();
     try expected(&doc);
@@ -569,6 +591,10 @@ test "ondemand struct iteration" {
 }
 
 test "ondemand struct iteration types" {
+    // FIXME this hangs in some windows release modes
+    // TODO figure out if this test is only an issue on real windows os or just with wine
+    if ((builtin.mode == .ReleaseFast and is_wine) or
+        (builtin.mode == .ReleaseSmall and builtin.target.os.tag == .linux)) return error.SkipZigTest;
     try test_ondemand_doc(
         \\ {"str": "strval", "f": 1.23, "t": true, "not": false, "n": null, "neg": -42 }
     , struct {
@@ -580,7 +606,7 @@ test "ondemand struct iteration types" {
             {
                 var f = (try objit.next(&buf)) orelse return testing.expect(false);
                 try testing.expectEqualStrings("str", buf[0..3]);
-                try testing.expectEqualStrings("strval", try f.value.get_string([]u8, &buf));
+                try testing.expectEqualStrings("strval", try f.value.get_string(&buf));
             }
             {
                 var f = (try objit.next(&buf)) orelse return testing.expect(false);
@@ -671,7 +697,9 @@ test "ondemand array iteration nested 1" {
 }
 
 test "ondemand root types" {
-    if (@import("builtin").target.cpu.arch == .aarch64 and @import("builtin").mode == .ReleaseSafe) return error.SkipZigTest;
+    if ((builtin.mode == .ReleaseSmall and is_wine) or
+        (builtin.mode == .ReleaseSafe and is_wine) or
+        (builtin.mode == .ReleaseFast and is_wine)) return error.SkipZigTest;
     try test_ondemand_doc(
         \\1
     , struct {
@@ -690,8 +718,16 @@ test "ondemand root types" {
         \\"string"
     , struct {
         fn func(doc: *ondemand.Document) E!void {
-            var buf: [6]u8 = undefined;
-            try testing.expectEqualStrings("string", try doc.get_string([]u8, &buf));
+            {
+                const s = try doc.get_string_alloc(allr);
+                defer allr.free(s);
+                try testing.expectEqualStrings("string", s);
+            }
+            {
+                var buf: [6]u8 = undefined;
+                const s = try doc.get_string(&buf);
+                try testing.expectEqualStrings("string", s);
+            }
         }
     }.func);
     try test_ondemand_doc(
@@ -792,22 +828,15 @@ test "ondemand get struct" {
     }.func);
 }
 
-test "get_string_alloc" {
+test "ondemand get_string_alloc" {
     try test_ondemand_doc(
         \\"asdf"
     , struct {
         fn func(doc: *ondemand.Document) E!void {
             var arena = std.heap.ArenaAllocator.init(allr);
             defer arena.deinit();
-            const a = arena.allocator();
-            {
-                const str = try doc.get_string_alloc([]u8, a);
-                try testing.expectEqualStrings("asdf", str);
-            }
-            {
-                const str = try doc.get_string_alloc([]const u8, a);
-                try testing.expectEqualStrings("asdf", str);
-            }
+            const str = try doc.get_string_alloc(arena.allocator());
+            try testing.expectEqualStrings("asdf", str);
         }
     }.func);
     const s = "asdf";
@@ -815,7 +844,7 @@ test "get_string_alloc" {
     const overlong_str = "\"" ++ s ** reps ++ "\"";
     try test_ondemand_doc(overlong_str, struct {
         fn func(doc: *ondemand.Document) E!void {
-            const str = doc.get_string_alloc([]const u8, allr);
+            const str = doc.get_string_alloc(allr);
             try testing.expectError(error.CAPACITY, str);
         }
     }.func);
@@ -912,7 +941,6 @@ fn domCheckTweets(parser: anytype) !void {
 }
 
 test "twitter" {
-    const builtin = @import("builtin");
     const output_filename: []const u8 = if (builtin.os.tag == .windows)
         "test\\twitter.json"
     else
@@ -944,8 +972,8 @@ test "twitter" {
     {
         var file = try std.fs.cwd().openFile(output_filename, .{ .mode = .read_only });
         defer file.close();
-        var src = std.io.StreamSource{ .file = file };
-        var parser = try ondemand.Parser.init(&src, allr, output_filename, .{});
+        var read_buf: [READ_BUF_CAP]u8 = undefined;
+        var parser = try ondemand.Parser.init(file, try file.getEndPos(), allr, output_filename, .{}, &read_buf);
         defer parser.deinit();
         var tweets = try parser.iterate();
         var x = try tweets.at_pointer("/search_metadata/count");

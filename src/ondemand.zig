@@ -55,11 +55,11 @@ pub const Value = struct {
     pub fn get_int(v: *Value, comptime T: type) !T {
         return v.iter.get_int(T);
     }
-    pub fn get_string(v: *Value, comptime T: type, buf: []u8) !T {
-        return v.iter.get_string(T, buf);
+    pub fn get_string(v: *Value, buf: []u8) ![]u8 {
+        return v.iter.get_string(buf);
     }
-    pub fn get_string_alloc(v: *Value, comptime T: type, allocator: mem.Allocator) !T {
-        return v.iter.get_string_alloc(T, allocator);
+    pub fn get_string_alloc(v: *Value, allocator: mem.Allocator) ![]u8 {
+        return v.iter.get_string_alloc(allocator);
     }
     pub fn get_double(v: *Value) !f64 {
         return v.iter.get_double();
@@ -138,7 +138,7 @@ pub const Value = struct {
                                                 }
                                                 out.* = try list.toOwnedSlice(allocator);
                                             },
-                                            .string => out.* = try val.get_string_alloc(C, allocator),
+                                            .string => out.* = try val.get_string_alloc(allocator),
                                             else => return error.INCORRECT_TYPE,
                                         }
                                     } else {
@@ -177,7 +177,7 @@ pub const Value = struct {
                     .slice => {
                         switch (try val.iter.get_type()) {
                             .string => _ = try if (options.allocator) |allocator|
-                                val.get_string_alloc(T, allocator)
+                                val.get_string_alloc(allocator)
                             else
                                 return error.INCORRECT_TYPE,
                             else => return error.INCORRECT_TYPE,
@@ -544,7 +544,7 @@ pub const Iterator = struct {
         return iter.token.index == iter.parser.structural_indices().ptr;
     }
 
-    pub inline fn next_structural(iter: *Iterator) [*]u32 {
+    pub fn next_structural(iter: *Iterator) [*]u32 {
         // std.log.debug("at-beginning {*}: {}", .{ iter.next_structural, iter.next_structural[0] });
         return @ptrFromInt(@intFromPtr(iter.token.index));
     }
@@ -616,6 +616,11 @@ pub const ValueIterator = struct {
     }
     fn is_at_start(vi: ValueIterator) bool {
         return vi.iter.token.index == vi.start_position;
+    }
+    fn is_at_iterator_start(vi: ValueIterator) bool {
+        // We can legitimately be either at the first value ([1]), or after the array if it's empty ([]).
+        const delta = vi.iter.token.index - vi.start_position;
+        return delta == 1 or delta == 2;
     }
     fn peek_start(vi: *ValueIterator, len: u16) ![*]const u8 {
         return try vi.iter.peek(vi.start_position, len);
@@ -718,9 +723,7 @@ pub const ValueIterator = struct {
 
         // If we're not at the position anymore, we don't want to advance the cursor.
         if (!vi.is_at_start()) {
-            // #ifdef SIMDJSON_DEVELOPMENT_CHECKS
-            //     if (!vi.is_at_iterator_start()) { return OUT_OF_ORDER_ITERATION; }
-            // #endif
+            if (builtin.mode == .Debug and !vi.is_at_iterator_start()) return error.OUT_OF_ORDER_ITERATION;
             return vi.peek_start(peek_len);
         }
 
@@ -1090,22 +1093,23 @@ pub const ValueIterator = struct {
             u64int) orelse return error.Overflow;
     }
 
-    pub fn unescape(comptime T: type, src: [*]const u8, dst: [*]u8) !T {
+    pub fn unescape(src: [*]const u8, dst: [*]u8) ![]u8 {
         const end = string_parsing.parse_string(src, dst) orelse return error.STRING_ERROR;
         const len = try cmn.ptr_diff(u32, end, dst);
-        return @as(T, dst[0..len]);
+        return dst[0..len];
     }
 
-    pub fn get_string(vi: *ValueIterator, comptime T: type, dest: []u8) !T {
+    pub fn get_string(vi: *ValueIterator, dest: []u8) ![]u8 {
         if (dest.len + 2 < vi.peek_start_length()) return error.CAPACITY;
         const peek_len = std.math.cast(u16, @min(READ_BUF_CAP, dest.len)) orelse return error.Overflow;
-        return unescape(T, try vi.get_raw_json_string(peek_len), dest.ptr);
+        return unescape(try vi.get_raw_json_string(peek_len), dest.ptr);
     }
-    pub fn get_string_alloc(vi: *ValueIterator, comptime T: type, allocator: mem.Allocator) !T {
+    pub fn get_string_alloc(vi: *ValueIterator, allocator: mem.Allocator) ![]u8 {
         const str_len = std.math.cast(u16, vi.peek_start_length()) orelse return error.Overflow;
         if (str_len + 2 > READ_BUF_CAP) return error.CAPACITY;
         const start = try vi.get_raw_json_string(str_len);
-        return string_parsing.parse_string_alloc(T, start, allocator, str_len);
+        assert(start[str_len - 2] == '"');
+        return string_parsing.parse_string_alloc(start, allocator, str_len - 2);
     }
 
     fn advance_start(vi: *ValueIterator, typ: []const u8, peek_len: u16) ![*]const u8 {
@@ -1158,11 +1162,11 @@ pub const ValueIterator = struct {
         }
         return number_parsing.parse_double(&tmpbuf);
     }
-    fn get_root_string(vi: *ValueIterator, comptime T: type, dest: []u8) !T {
-        return vi.get_string(T, dest);
+    fn get_root_string(vi: *ValueIterator, dest: []u8) ![]u8 {
+        return vi.get_string(dest);
     }
-    fn get_root_string_alloc(vi: *ValueIterator, comptime T: type, allocator: mem.Allocator) !T {
-        return vi.get_string_alloc(T, allocator);
+    fn get_root_string_alloc(vi: *ValueIterator, allocator: mem.Allocator) ![]u8 {
+        return vi.get_string_alloc(allocator);
     }
     fn get_root_bool(vi: *ValueIterator) !bool {
         const max_len = vi.peek_start_length();
@@ -1231,10 +1235,10 @@ pub const Document = struct {
     iter: Iterator,
     pub const DOCUMENT_DEPTH = 0;
 
-    inline fn get_root_value_iterator(doc: *Document) ValueIterator {
+    fn get_root_value_iterator(doc: *Document) ValueIterator {
         return doc.resume_value_iterator();
     }
-    inline fn resume_value_iterator(doc: *Document) ValueIterator {
+    fn resume_value_iterator(doc: *Document) ValueIterator {
         return ValueIterator.init(doc.iter, 1, doc.iter.root_checkpoint());
     }
     pub fn get_object(doc: *Document) !Object {
@@ -1259,16 +1263,16 @@ pub const Document = struct {
         var it = doc.get_root_value_iterator();
         return it.get_root_int(T);
     }
-    pub fn get_string(doc: *Document, comptime T: type, buf: []u8) !T {
+    pub fn get_string(doc: *Document, buf: []u8) ![]u8 {
         var it = doc.get_root_value_iterator();
-        return it.get_root_string(T, buf);
+        return it.get_root_string(buf);
     }
     /// WARNING: the retuned string is allocated with leading and trailing quotes included.
     /// but the returned slice bounds don't include the quotes. so it must be adjusted to include
     /// the quotes before it can be properly freed.
-    pub fn get_string_alloc(doc: *Document, comptime T: type, allocator: mem.Allocator) !T {
+    pub fn get_string_alloc(doc: *Document, allocator: mem.Allocator) ![]u8 {
         var it = doc.get_root_value_iterator();
-        return it.get_root_string_alloc(T, allocator);
+        return it.get_root_string_alloc(allocator);
     }
     pub fn get_double(doc: *Document) !f64 {
         var it = doc.get_root_value_iterator();
@@ -1291,8 +1295,7 @@ pub const Document = struct {
     }
     pub fn at_pointer(doc: *Document, json_pointer: []const u8) !Value {
         try doc.rewind(); // Rewind the document each time at_pointer is called
-        if (json_pointer.len == 0)
-            return doc.resume_value();
+        if (json_pointer.len == 0) return doc.resume_value();
         return switch (try doc.get_type()) {
             .array => blk: {
                 var x = try doc.get_array();
@@ -1326,18 +1329,18 @@ pub const Document = struct {
 
 pub const Parser = struct {
     parser: dom.Parser,
-    src: *std.io.StreamSource,
-    end_pos: u32,
+    src: std.fs.File,
+    end_pos: usize,
     /// buffer used for reading from `src`
-    read_buf: [READ_BUF_CAP]u8 = undefined,
+    read_buf: *[READ_BUF_CAP]u8,
     /// result of src.read() - number of bytes read from src
     read_buf_len: u16 = 0,
     /// src index of the start of the buffer.  set to index[0] each src.read()
     read_buf_start_pos: u32,
     log: Logger = .{ .depth = 0 },
 
-    pub fn init(src: *std.io.StreamSource, allocator: mem.Allocator, filename: []const u8, options: dom.Parser.Options) !Parser {
-        var result = Parser{
+    pub fn init(src: std.fs.File, src_end_pos: usize, allocator: mem.Allocator, filename: []const u8, options: dom.Parser.Options, read_buf: *[READ_BUF_CAP]u8) !Parser {
+        var result: Parser = .{
             .parser = .{
                 .allocator = allocator,
                 .filename = filename,
@@ -1346,13 +1349,13 @@ pub const Parser = struct {
                 .open_containers = .{},
                 .max_depth = options.max_depth,
             },
+            .read_buf = read_buf,
             .src = src,
-            .end_pos = std.math.cast(u32, try src.getEndPos()) orelse return error.Overflow,
+            .end_pos = src_end_pos,
             .read_buf_start_pos = 0,
             .read_buf_len = 0,
         };
-        const capacity = result.end_pos;
-        const max_structures = cmn.ROUNDUP_N(capacity, 64) + 2 + 7;
+        const max_structures = cmn.ROUNDUP_N(src_end_pos, 64) + 2 + 7;
         try result.parser.indexer.bit_indexer.tail.ensureTotalCapacity(allocator, max_structures);
         try result.parser.open_containers.ensureTotalCapacity(allocator, options.max_depth);
         return result;
@@ -1390,7 +1393,7 @@ pub const Parser = struct {
         return Document{ .iter = Iterator.init(p) };
     }
 
-    inline fn structural_indices(parser: Parser) []u32 {
+    fn structural_indices(parser: Parser) []u32 {
         return parser.parser.indexer.bit_indexer.tail.items;
     }
 
@@ -1401,22 +1404,19 @@ pub const Parser = struct {
         position: [*]const u32,
         len_hint: u16,
     ) ![*]const u8 {
-        // cmn.println("peek() len_hint {} READ_BUF_CAP {}", .{ len_hint, READ_BUF_CAP });
         if (len_hint > READ_BUF_CAP) return error.CAPACITY;
-        // cmn.println("\nTokenIterator: {} <= start {} end {} < read_buf_start_pos + len {}", .{ parser.read_buf_start_pos, start, end, read_buf_start_pos + read_buf_len });
-        // cmn.println("parser {*} position {*} len_hint {}", .{parser, position, len_hint});
         const start_pos = position[0];
         if (parser.read_buf_start_pos <= start_pos and start_pos < parser.read_buf_start_pos + parser.read_buf_len) blk: {
             const offset = start_pos - parser.read_buf_start_pos;
             if (offset + len_hint > READ_BUF_CAP) break :blk;
-            return @as([*]const u8, @ptrCast(&parser.read_buf)) + offset;
+            return parser.read_buf[offset..].ptr;
         }
-        // cmn.println("TokenIterator: seek and read()", .{});
         try parser.src.seekTo(start_pos);
         parser.read_buf_start_pos = start_pos;
-        // not sure that 0xaa is the best value here but it does prevent false positives like [nul]
-        @memset(&parser.read_buf, 0xaa);
-        parser.read_buf_len = @as(u16, @truncate(try parser.src.read(&parser.read_buf)));
-        return &parser.read_buf;
+        comptime assert(READ_BUF_CAP <= std.math.maxInt(u16));
+        parser.read_buf_len = @as(u16, @truncate(try parser.src.read(parser.read_buf)));
+        // not sure that '_' is the best value here but it does prevent false positives like [nul]
+        @memset(parser.read_buf[parser.read_buf_len..], '_');
+        return parser.read_buf;
     }
 };

@@ -31,8 +31,7 @@ const escape_map = [256]u8{
 // return true if the unicode codepoint was valid
 // We work in little-endian then swap at write time
 
-// inline fn handle_unicode_codepoint(src: *std.io.StreamSource, dst: *std.ArrayListUnmanaged(u8), allocator: *mem.Allocator) !bool {
-inline fn handle_unicode_codepoint2(dst: []u8) !bool {
+fn handle_unicode_codepoint2(dst: []u8) !bool {
     // jsoncharutils::hex_to_u32_nocheck fills high 16 bits of the return value with 1s if the
     // conversion isn't valid; we defer the check for this to inside the
     // multilingual plane check
@@ -74,7 +73,7 @@ inline fn handle_unicode_codepoint2(dst: []u8) !bool {
     return offset > 0;
 }
 
-inline fn handle_unicode_codepoint(src_ptr: *[*]const u8, dst_ptr: *[*]u8) bool {
+fn handle_unicode_codepoint(src_ptr: *[*]const u8, dst_ptr: *[*]u8) bool {
     // jsoncharutils::hex_to_u32_nocheck fills high 16 bits of the return value with 1s if the
     // conversion isn't valid; we defer the check for this to inside the
     // multilingual plane check
@@ -108,7 +107,7 @@ inline fn handle_unicode_codepoint(src_ptr: *[*]const u8, dst_ptr: *[*]u8) bool 
 
 /// Unescape a string from src to dst, stopping at a final unescaped quote. E.g., if src points at 'joe"', then
 /// dst needs to have four free bytes.
-pub inline fn parse_string(src_: [*]const u8, dst_: [*]u8) ?[*]u8 {
+pub fn parse_string(src_: [*]const u8, dst_: [*]u8) ?[*]u8 {
     var src = src_;
     var dst = dst_;
     while (true) {
@@ -166,7 +165,7 @@ pub inline fn parse_string(src_: [*]const u8, dst_: [*]u8) ?[*]u8 {
 /// WARNING: the retuned slice is allocated with leading and trailing quotes included.
 /// but the returned slice bounds don't include the quotes. so it must be adjusted to include
 /// the quotes before it can be properly freed.
-pub inline fn parse_string_alloc(comptime T: type, src_: [*]const u8, allocator: mem.Allocator, str_len: u16) !T {
+pub fn parse_string_alloc(src_: [*]const u8, allocator: mem.Allocator, str_len: u16) ![]u8 {
     var src = src_;
     var dst_slice = try allocator.alloc(u8, str_len);
     dst_slice.len = 0;
@@ -220,7 +219,6 @@ pub inline fn parse_string_alloc(comptime T: type, src_: [*]const u8, allocator:
             dst_slice.len += BackslashAndQuote.BYTES_PROCESSED;
         }
     }
-    //   /* can't be reached */
     unreachable;
 }
 
@@ -229,7 +227,7 @@ pub const BackslashAndQuote = struct {
     quote_bits: u32,
     pub const BYTES_PROCESSED = 32;
 
-    pub inline fn copy_and_find(src: [*]const u8, dst: [*]u8) !BackslashAndQuote {
+    pub fn copy_and_find(src: [*]const u8, dst: [*]u8) !BackslashAndQuote {
         // std.log.debug("nbytes {} s: '{s}'", .{ nbytes, s[0..nbytes] });
         const src_vec: v.u8x32 = src[0..BYTES_PROCESSED].*;
         // store to dest unconditionally - we can overwrite the bits we don't like later
@@ -418,7 +416,7 @@ pub const CharUtils = struct {
         0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
     };
 
-    pub inline fn hex_to_u32_nocheck(src: [*]const u8) u32 {
+    pub fn hex_to_u32_nocheck(src: [*]const u8) u32 {
         const v1 = digit_to_val32[630 + @as(u16, src[0])];
         const v2 = digit_to_val32[420 + @as(u16, src[1])];
         const v3 = digit_to_val32[210 + @as(u16, src[2])];
@@ -426,7 +424,7 @@ pub const CharUtils = struct {
         return v1 | v2 | v3 | v4;
     }
 
-    pub inline fn codepoint_to_utf8(cp: u32, c: [*]u8) u3 {
+    pub fn codepoint_to_utf8(cp: u32, c: [*]u8) u3 {
         if (cp <= 0x7F) {
             c[0] = @truncate(cp);
             return 1; // ascii

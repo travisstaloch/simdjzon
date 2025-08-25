@@ -1272,8 +1272,6 @@ pub const TapeBuilder = struct {
     }
 };
 
-const bytes_align: std.mem.Alignment = @enumFromInt(std.math.log2(cmn.chunk_len));
-
 pub const Parser = struct {
     filename: []const u8,
     allocator: mem.Allocator,
@@ -1286,7 +1284,7 @@ pub const Parser = struct {
     open_containers: std.MultiArrayList(OpenContainerInfo),
     max_depth: u16,
     n_structural_indexes: u32 = 0,
-    bytes: std.ArrayListAlignedUnmanaged(u8, bytes_align) = .{},
+    bytes: std.ArrayListAlignedUnmanaged(u8, cmn.chunk_align) = .{},
     input_len: u32 = 0,
 
     pub const Options = struct {
@@ -1382,7 +1380,10 @@ pub const Parser = struct {
     /// as: 'parser.bytes.ensureTotalCapacity(N)' where N is >= input.len + 32.
     pub fn initExistingFromReader(parser: *Parser, reader: *std.io.Reader, options: Options) !void {
         parser.clearRetainingCapacity();
-        try reader.appendRemaining(parser.allocator, bytes_align, &parser.bytes, .unlimited);
+        var bytes_unaligned: std.ArrayList(u8) = .{ .items = parser.bytes.items, .capacity = parser.bytes.capacity };
+        try reader.appendRemaining(parser.allocator, &bytes_unaligned, .unlimited);
+        parser.bytes.deinit(parser.allocator);
+        parser.bytes = .{ .items = @alignCast(bytes_unaligned.items), .capacity = bytes_unaligned.capacity };
         parser.input_len = std.math.cast(u32, parser.bytes.items.len) orelse
             return error.Overflow;
 
@@ -1821,9 +1822,11 @@ pub const Element = struct {
         options: cmn.GetOptions,
         comptime child_info: std.builtin.Type,
     ) cmn.Error!void {
-        const Cchild = child_info.pointer.child;
+        const Child = child_info.pointer.child;
         const allocator = options.allocator orelse return error.AllocatorRequired;
-        var elems = std.ArrayList(Cchild).init(allocator);
+        var elems: std.ArrayList(Child) = .empty;
+        defer elems.deinit(allocator);
+
         const arr = ele.get_array() catch unreachable;
         var it = TapeRefIterator.init(arr);
         // for (it.tape.doc.tape.items, 0..) |item, i| {
@@ -1832,15 +1835,15 @@ pub const Element = struct {
 
         while (true) {
             const arr_ele = Element{ .tape = it.tape };
-            var out_ele: Cchild = undefined;
+            var out_ele: Child = undefined;
             const idx = it.tape.after_element();
             // std.debug.print("next_element={}:{}\n", .{ idx, TapeType.from_u64(it.tape.doc.tape.items[idx]) });
             try arr_ele.jsonParse(&out_ele, options);
-            try elems.append(out_ele);
+            try elems.append(allocator, out_ele);
             it.tape.idx = idx;
             if (it.tape.idx >= it.end_idx) break;
         }
-        out.* = try elems.toOwnedSlice();
+        out.* = try elems.toOwnedSlice(allocator);
     }
 
     // TODO support user error sets

@@ -31,6 +31,5 @@ pub fn main() !u8 {
         std.debug.print("error. expected i=100. found i={}\n", .{i});
         return 1;
     }
-
     return 0;
 }
