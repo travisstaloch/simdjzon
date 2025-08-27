@@ -40,8 +40,9 @@ pub const Document = struct {
     }
 
     pub fn deinit(doc: *Document, allocator: mem.Allocator) void {
-        doc.tape.deinit(allocator);
-        doc.string_buf.deinit(allocator);
+        // use clearAndFree() instead of deinit() to support reusing after calling deinit
+        doc.tape.clearAndFree(allocator);
+        doc.string_buf.clearAndFree(allocator);
     }
 };
 
@@ -1380,16 +1381,19 @@ pub const Parser = struct {
     /// as: 'parser.bytes.ensureTotalCapacity(N)' where N is >= input.len + 32.
     pub fn initExistingFromReader(parser: *Parser, reader: *std.io.Reader, options: Options) !void {
         parser.clearRetainingCapacity();
-        var bytes_unaligned: std.ArrayList(u8) = .{ .items = parser.bytes.items, .capacity = parser.bytes.capacity };
-        try reader.appendRemaining(parser.allocator, &bytes_unaligned, .unlimited);
-        parser.bytes.deinit(parser.allocator);
-        parser.bytes = .{ .items = @alignCast(bytes_unaligned.items), .capacity = bytes_unaligned.capacity };
-        parser.input_len = std.math.cast(u32, parser.bytes.items.len) orelse
-            return error.Overflow;
 
-        const paddedlen = try std.math.add(u32, parser.input_len, cmn.SIMDJSON_PADDING);
-        try parser.bytes.ensureTotalCapacity(parser.allocator, paddedlen);
-        parser.bytes.items.len = paddedlen;
+        var aligned_w: cmn.AlignedAllocating(cmn.chunk_align) = .initOwnedSlice(
+            parser.allocator,
+            parser.bytes.allocatedSlice(),
+        );
+        _ = try reader.streamRemaining(&aligned_w.writer);
+
+        parser.input_len = std.math.cast(u32, aligned_w.written().len) orelse
+            return error.Overflow;
+        const padded_len = try std.math.add(u32, parser.input_len, cmn.SIMDJSON_PADDING);
+        parser.bytes = aligned_w.toArrayList();
+        try parser.bytes.ensureTotalCapacityPrecise(parser.allocator, padded_len);
+        parser.bytes.items.len = padded_len;
         try parser.finishInit(options);
     }
 
@@ -1405,23 +1409,25 @@ pub const Parser = struct {
     }
 
     pub fn deinit(parser: *Parser) void {
-        parser.indexer.bit_indexer.tail.deinit(parser.allocator);
-        parser.open_containers.deinit(parser.allocator);
+        // use clearAndFree() instead of deinit() to support reusing after calling deinit
+        parser.indexer.bit_indexer.tail.clearAndFree(parser.allocator);
+        parser.open_containers.clearAndFree(parser.allocator);
         parser.doc.deinit(parser.allocator);
-        parser.bytes.deinit(parser.allocator);
+        parser.bytes.clearAndFree(parser.allocator);
     }
 
     // reset the parser so that it may be re-used.  called by initExisting() and
     // initExistingFromReader()
     fn clearRetainingCapacity(parser: *Parser) void {
+        const p = parser.*;
         parser.* = .{
-            .filename = parser.filename,
-            .allocator = parser.allocator,
-            .doc = parser.doc,
-            .indexer = .{ .bit_indexer = .{ .tail = parser.indexer.bit_indexer.tail } },
-            .open_containers = parser.open_containers,
-            .bytes = parser.bytes,
-            .max_depth = parser.max_depth,
+            .filename = p.filename,
+            .allocator = p.allocator,
+            .doc = p.doc,
+            .indexer = .{ .bit_indexer = .{ .tail = p.indexer.bit_indexer.tail } },
+            .open_containers = p.open_containers,
+            .bytes = p.bytes,
+            .max_depth = p.max_depth,
         };
         parser.indexer.bit_indexer.tail.clearRetainingCapacity();
         parser.open_containers.shrinkRetainingCapacity(0);
@@ -1525,6 +1531,7 @@ pub const Parser = struct {
     }
 
     pub fn parse(parser: *Parser) !void {
+        errdefer parser.deinit();
         try parser.stage1();
         return parser.stage2();
     }
@@ -1725,7 +1732,6 @@ const TapeRef = struct {
 
     pub fn get_string_length(tr: TapeRef) u32 {
         const string_buf_index = tr.value();
-        // std.debug.print("get_string_length string_buf_index={}\n", .{string_buf_index});
         return mem.readInt(u32, (tr.doc.string_buf.items.ptr + string_buf_index)[0..@sizeOf(u32)], .little);
     }
 
@@ -1829,15 +1835,11 @@ pub const Element = struct {
 
         const arr = ele.get_array() catch unreachable;
         var it = TapeRefIterator.init(arr);
-        // for (it.tape.doc.tape.items, 0..) |item, i| {
-        //     std.debug.print("{}/{}={}\n", .{ i, it.end_idx, TapeType.from_u64(item) });
-        // }
 
         while (true) {
             const arr_ele = Element{ .tape = it.tape };
             var out_ele: Child = undefined;
             const idx = it.tape.after_element();
-            // std.debug.print("next_element={}:{}\n", .{ idx, TapeType.from_u64(it.tape.doc.tape.items[idx]) });
             try arr_ele.jsonParse(&out_ele, options);
             try elems.append(allocator, out_ele);
             it.tape.idx = idx;
@@ -1890,7 +1892,6 @@ pub const Element = struct {
                             },
                             .pointer => if (child_info.pointer.size == .slice) {
                                 if (child_info.pointer.child == u8) {
-                                    // std.debug.print("ele.tape.tape_ref_type()={}", .{ele.tape.tape_ref_type()});
                                     switch (ele.tape.tape_ref_type()) {
                                         .STRING => out.* = try ele.get_string(),
                                         .START_ARRAY => try readSlice(ele, out, options, child_info),

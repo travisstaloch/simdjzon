@@ -1068,3 +1068,20 @@ test "twitter" {
         try testing.expectEqual(@as(u8, 100), count);
     }
 }
+
+test "Writer.AlignedAllocating" {
+    const input =
+        \\[{"foo": null, "params": [1,2,4],  "id": 1},
+        \\ {"foo": null, "params": [1,2,10], "id": 2},
+        \\ {"foo": null, "params": [1,2,11], "id": 3},
+        \\ {"foo": null, "params": [1,2,12], "id": 4}]
+    ;
+    var reader = std.Io.Reader.fixed(input);
+    var bytes: std.ArrayListAlignedUnmanaged(u8, .fromByteUnits(32)) = .{};
+    try bytes.ensureTotalCapacity(allr, 100); // simulate existing allocation
+    defer bytes.deinit(allr);
+    var aligned_w: cmn.AlignedAllocating(.fromByteUnits(32)) = .initOwnedSlice(allr, bytes.allocatedSlice());
+    _ = try reader.streamRemaining(&aligned_w.writer);
+    bytes = aligned_w.toArrayList();
+    try std.testing.expect(std.mem.Alignment.fromByteUnits(32).check(@intFromPtr(bytes.items.ptr)));
+}
