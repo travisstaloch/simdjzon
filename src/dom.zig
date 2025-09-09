@@ -167,7 +167,7 @@ const Utf8Checker = struct {
         const byte_1_high = c.mm256_shuffle_epi8(tbl1, byte_1_high_0);
         const CARRY: u8 = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
         const byte_1_low0 = prev1 & @as(v.u8x32, @splat(0x0F));
-        
+
         const tbl2 = [16]u8{
             // ____0000 ________
             CARRY | OVERLONG_3 | OVERLONG_2 | OVERLONG_4,
@@ -176,7 +176,7 @@ const Utf8Checker = struct {
             // ____001_ ________
             CARRY,
             CARRY,
-            
+
             // ____0100 ________
             CARRY | TOO_LARGE,
             // ____0101 ________
@@ -215,7 +215,7 @@ const Utf8Checker = struct {
         const byte_2_high = c.mm256_shuffle_epi8(tbl3, byte_2_high_0);
         return (byte_1_high & byte_1_low & byte_2_high);
     }
-    
+
     fn check_special_cases_arm64(input: Chunk, prev1: Chunk) Chunk {
         // Bit 0 = Too Short (lead byte/ASCII followed by lead byte/ASCII)
         // Bit 1 = Too Long (ASCII followed by continuation)
@@ -223,7 +223,7 @@ const Utf8Checker = struct {
         // Bit 4 = Surrogate
         // Bit 5 = Overlong 2-byte
         // Bit 7 = Two Continuations
-     
+
         const TOO_SHORT: u8 = 1 << 0;   // 11______ 0_______
                                         // 11______ 11______
         const TOO_LONG: u8 = 1 << 1;    // 0_______ 10______
@@ -263,10 +263,10 @@ const Utf8Checker = struct {
             TOO_SHORT | TOO_LARGE | TOO_LARGE_1000 | OVERLONG_4,
         };
 
-        const byte_1_high = c.lookup_16_aarch64(byte_1_high_0, tbl1); 
+        const byte_1_high = c.lookup_16_aarch64(byte_1_high_0, tbl1);
         const CARRY: u8 = TOO_SHORT | TOO_LONG | TWO_CONTS; // These all have ____ in byte 1 .
         const byte_1_low0 = prev1 & @as(Chunk, @splat(0x0F));
-        
+
         const tbl2 = [16]u8{
             // ____0000 ________
             CARRY | OVERLONG_3 | OVERLONG_2 | OVERLONG_4,
@@ -275,7 +275,7 @@ const Utf8Checker = struct {
             // ____001_ ________
             CARRY,
             CARRY,
-            
+
             // ____0100 ________
             CARRY | TOO_LARGE,
             // ____0101 ________
@@ -1323,7 +1323,7 @@ pub const Parser = struct {
         return parser;
     }
 
-    pub fn initFromReader(allocator: mem.Allocator, reader: *std.io.Reader, options: Options) !Parser {
+    pub fn initFromReader(allocator: mem.Allocator, reader: *std.Io.Reader, options: Options) !Parser {
         // TODO bench with Reader.expandTotalCapacity or Reader.fillMore
         var parser = Parser{
             .filename = "<reader>",
@@ -1379,7 +1379,7 @@ pub const Parser = struct {
     /// may be a performance penalty when adding the padding causes the input to
     /// be moved.  this penalty may be avoided by pre-setting the capacity such
     /// as: 'parser.bytes.ensureTotalCapacity(N)' where N is >= input.len + 32.
-    pub fn initExistingFromReader(parser: *Parser, reader: *std.io.Reader, options: Options) !void {
+    pub fn initExistingFromReader(parser: *Parser, reader: *std.Io.Reader, options: Options) !void {
         parser.clearRetainingCapacity();
 
         var aligned_w: cmn.AlignedAllocating(cmn.chunk_align) = .initOwnedSlice(

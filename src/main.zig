@@ -19,7 +19,9 @@ pub fn domMain(allocator: std.mem.Allocator, args: Args) !u8 {
 
     if (args.filename.len == 0) {
         const stdin = std.fs.File.stdin();
-        const input = try stdin.readToEndAlloc(allocator, std.math.maxInt(u32));
+        var buf: [4096]u8 = undefined;
+        var freader = stdin.reader(&buf);
+        const input = try freader.interface.allocRemaining(allocator, .limited(std.math.maxInt(u32)));
         parser = try dom.Parser.initFixedBuffer(allocator, input, .{});
     } else {
         parser = try dom.Parser.initFile(allocator, args.filename, .{});

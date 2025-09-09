@@ -17,7 +17,9 @@ const is_win_release_small = builtin.mode == .ReleaseSmall and
 test "tape build 1" {
     const f = try std.fs.cwd().openFile("test/test.json", .{});
     defer f.close();
-    const input = try f.readToEndAlloc(allr, std.math.maxInt(u32));
+    var buf: [1024]u8 = undefined;
+    var freader = f.reader(&buf);
+    const input = try freader.interface.allocRemaining(allr, .limited(std.math.maxInt(u32)));
     defer allr.free(input);
     const expecteds = [_]u64{
         TapeType.ROOT.encode_value(37), //  pointing  to 37 (rightafter  last  node) :0
@@ -103,7 +105,7 @@ test "tape build 1" {
 
 test "tape build 2" {
     const input =
-        \\{ "\\\"Nam[{": [ 116,"\\\\" , 234, "true", false ], "t":"\\\""}                                         
+        \\{ "\\\"Nam[{": [ 116,"\\\\" , 234, "true", false ], "t":"\\\""}
     ;
     var parser = try dom.Parser.initFixedBuffer(allr, input, .{});
     defer parser.deinit();
