@@ -309,7 +309,7 @@ pub fn AlignedAllocating(comptime alignment: mem.Alignment) type {
             if (additional == 0) return error.EndOfStream;
             list.ensureUnusedCapacity(gpa, limit.minInt64(additional)) catch return error.WriteFailed;
             const dest = limit.slice(list.unusedCapacitySlice());
-            const n = try file_reader.read(dest);
+            const n = try file_reader.interface.readSliceShort(dest);
             list.items.len += n;
             return n;
         }

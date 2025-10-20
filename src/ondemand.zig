@@ -1374,7 +1374,7 @@ pub const Parser = struct {
         cmn.println("", .{});
         while (true) : (pos += cmn.STEP_SIZE) {
             // cmn.println("i {} pos {}", .{ i, pos });
-            bytes_read = @intCast(try p.src.read(&read_buf));
+            bytes_read = @intCast(try p.src.interface.readSliceShort(&read_buf));
             if (bytes_read < cmn.STEP_SIZE) break;
 
             try p.parser.indexer.step(read_buf, &p.parser, pos);
